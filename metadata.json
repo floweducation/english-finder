@@ -1,0 +1,5 @@
+{
+  "name": "English Passage Source Finder",
+  "description": "Find the original source of CSAT and mock exam English passages using Google Books search.",
+  "requestFramePermissions": []
+}
