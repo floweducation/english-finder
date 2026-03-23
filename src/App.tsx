@@ -51,6 +51,7 @@ const WORKSHEETMAKER_POST_URL = 'https://www.worksheetmaker.co.kr/user20/dataTex
 const WORKSHEETMAKER_HOME_URL = 'https://www.worksheetmaker.co.kr/';
 const FLOW_BLOG_URL = 'https://flowedu.tistory.com';
 const APP_HOME_URL = 'https://english-finder.vercel.app/';
+const BRAND_LINK_CLASS = 'inline-flex items-center rounded-md px-2 py-1 text-sm font-medium text-sky-700 transition-colors hover:bg-sky-50 hover:text-sky-800';
 const MIN_WORKSHEET_WORDS = 3;
 const MAX_ENHANCEMENT_RETRIES = 3;
 
@@ -422,7 +423,6 @@ export default function App() {
   const displayedWorksheetResults = useMemo(() => worksheetResults?.results.slice(0, 2) ?? [], [worksheetResults]);
   const hasAnyResultsView = lastQuery || isSearching;
   const currentGoogleQuery = googleQueryUsed || lastQuery || normalizedPassage;
-  const hasGoogleBooksWithoutPreview = googleResults.some((result) => !result.previewAvailable);
   const canShowEnhancementButton =
     !isSearching &&
     !isEnhancing &&
@@ -460,13 +460,14 @@ export default function App() {
           <section className="space-y-4 text-center">
             <div className="flex flex-wrap items-baseline justify-center gap-x-2 gap-y-1">
               <h2 className="text-3xl font-bold text-slate-800">지문 원문 찾기</h2>
+              <span className="text-sm text-slate-500">by</span>
               <a
                 href={FLOW_BLOG_URL}
                 target="_blank"
                 rel="noreferrer"
-                className="text-sm font-medium text-slate-500 transition-colors hover:text-indigo-600"
+                className={BRAND_LINK_CLASS}
               >
-                by Flow 영어연구소
+                Flow 영어연구소
               </a>
             </div>
             <p className="mx-auto max-w-2xl text-slate-600">
@@ -648,12 +649,6 @@ export default function App() {
                     </div>
                   )}
 
-                  {googleResults.length > 0 && hasGoogleBooksWithoutPreview && (
-                    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-500">
-                      공개 전체보기로 확인된 경우에만 전체 미리보기 버튼을 표시합니다. 그 외에는 Google Books 검색으로 이동해 확인할 수 있습니다.
-                    </div>
-                  )}
-
                   <div className="space-y-4">
                     {googleResults.map((result) => (
                       <article key={result.id} className="rounded-2xl border border-slate-200 p-4">
@@ -682,41 +677,31 @@ export default function App() {
                               <p className="line-clamp-3 text-sm leading-relaxed text-slate-600">{highlightText(result.snippet, currentGoogleQuery)}</p>
                             )}
                             <div className="flex flex-wrap items-center gap-2 pt-1">
-                              {result.previewAvailable && result.previewLink ? (
-                                <a
-                                  href={result.previewLink}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="rounded-full bg-indigo-50 px-3 py-1.5 text-xs font-medium text-indigo-700 transition-colors hover:bg-indigo-100"
-                                >
-                                  전체 미리보기
-                                </a>
-                              ) : (
-                                <a
-                                  href={buildGoogleBooksSearchUrl(currentGoogleQuery || lastQuery)}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="rounded-full bg-indigo-50 px-3 py-1.5 text-xs font-medium text-indigo-700 transition-colors hover:bg-indigo-100"
-                                >
-                                  Google Books 열기
-                                </a>
-                              )}
-                              {result.infoLink && (
-                                <a
-                                  href={result.infoLink}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="rounded-full bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-200"
-                                >
-                                  도서 정보
-                                </a>
-                              )}
+                              <a
+                                href={buildGoogleBooksSearchUrl(currentGoogleQuery || lastQuery)}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="rounded-full bg-indigo-50 px-3 py-1.5 text-xs font-medium text-indigo-700 transition-colors hover:bg-indigo-100"
+                              >
+                                Google Books 열기
+                              </a>
+                              <a
+                                href={result.previewLink || buildGoogleBooksSearchUrl(currentGoogleQuery || lastQuery)}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="rounded-full bg-violet-50 px-3 py-1.5 text-xs font-medium text-violet-700 transition-colors hover:bg-violet-100"
+                              >
+                                미리보기
+                              </a>
+                              <a
+                                href={result.infoLink || buildGoogleBooksSearchUrl(currentGoogleQuery || lastQuery)}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="rounded-full bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-200"
+                              >
+                                도서 정보
+                              </a>
                             </div>
-                            {!result.previewAvailable && (
-                              <p className="text-xs text-slate-400">
-                                공개 전체보기 여부가 확실하지 않아 Google Books 검색으로 바로 이동할 수 있게 표시했습니다.
-                              </p>
-                            )}
                           </div>
                         </div>
                       </article>
@@ -863,7 +848,7 @@ export default function App() {
       </main>
 
       <footer className="mx-auto mt-12 max-w-6xl border-t border-slate-200 px-6 py-12 text-center text-sm text-slate-400">
-        <p>© 2026 <a href={FLOW_BLOG_URL} target="_blank" rel="noreferrer" className="font-medium text-slate-500 underline-offset-4 transition-colors hover:text-indigo-600 hover:underline">Flow 영어연구소</a>. All rights reserved.</p>
+        <p>© 2026 <a href={FLOW_BLOG_URL} target="_blank" rel="noreferrer" className={BRAND_LINK_CLASS}>Flow 영어연구소</a>. All rights reserved.</p>
       </footer>
     </div>
   );
