@@ -50,25 +50,24 @@ const countWords = (value: string) => normalizePassage(value).split(' ').filter(
 const stripHtml = (value?: string) => (value ?? '').replace(/<[^>]+>/g, '').trim();
 
 async function fetchGoogleBooks(query: string): Promise<GoogleBookResult[]> {
-  const response = await fetch(
-    `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(`"${query}"`)}&maxResults=6&langRestrict=en&printType=books`,
-  );
+  const response = await fetch(`/api/google-books-search?q=${encodeURIComponent(query)}`);
 
   if (!response.ok) {
-    throw new Error(`Google Books request failed with ${response.status}`);
+    const errorPayload = await response.json().catch(() => null);
+    throw new Error(errorPayload?.error ?? `Google Books request failed with ${response.status}`);
   }
 
   const data = await response.json();
 
-  return (data.items ?? []).map((item: any) => ({
+  return (data.results ?? []).map((item: any) => ({
     id: item.id,
-    title: item.volumeInfo?.title ?? '제목 없음',
-    authors: item.volumeInfo?.authors ?? [],
-    publishedDate: item.volumeInfo?.publishedDate,
-    thumbnail: item.volumeInfo?.imageLinks?.thumbnail,
-    previewLink: item.volumeInfo?.previewLink,
-    infoLink: item.volumeInfo?.infoLink,
-    snippet: stripHtml(item.searchInfo?.textSnippet),
+    title: item.title ?? '제목 없음',
+    authors: item.authors ?? [],
+    publishedDate: item.publishedDate,
+    thumbnail: item.thumbnail,
+    previewLink: item.previewLink,
+    infoLink: item.infoLink,
+    snippet: stripHtml(item.snippet),
   }));
 }
 
@@ -312,6 +311,10 @@ export default function App() {
                       <AlertCircle size={16} className="mt-0.5 shrink-0" />
                       <span>{googleError}</span>
                     </div>
+                  )}
+
+                  {!googleError && (
+                    <p className="text-xs text-slate-400">Google Books 데이터 제공</p>
                   )}
 
                   {!googleError && !isSearching && googleResults.length === 0 && lastQuery && (
