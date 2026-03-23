@@ -161,6 +161,11 @@ function highlightTextWithPatterns(text: string, patterns: HighlightPattern[]) {
   });
 }
 
+
+function renderQueryWithPatterns(text: string, patterns: HighlightPattern[]) {
+  return <span className="break-words">{highlightTextWithPatterns(text, patterns)}</span>;
+}
+
 function extractEnhancementQueries(passage: string, originalQuery: string) {
   const originalNormalized = sanitizeSearchQuery(originalQuery).toLowerCase();
   const normalizedPassage = sanitizeSearchQuery(stripHtml(passage))
@@ -484,6 +489,7 @@ export default function App() {
 
     return patterns;
   }, [enhancementMatchedQuery, lastQuery]);
+  const googleHighlightPatterns = worksheetHighlightPatterns;
   const canShowEnhancementButton =
     !isSearching &&
     !isEnhancing &&
@@ -660,7 +666,7 @@ export default function App() {
                               <p className="text-xs font-semibold uppercase tracking-wider text-indigo-500">시도한 검색 문구</p>
                               <ul className="mt-1 space-y-1 text-xs text-indigo-600">
                                 {enhancementAttempts.map((attempt) => (
-                                  <li key={attempt}>• {attempt}</li>
+                                  <li key={attempt}>• {renderQueryWithPatterns(attempt, googleHighlightPatterns)}</li>
                                 ))}
                               </ul>
                             </div>
@@ -700,7 +706,7 @@ export default function App() {
                   {googleResults.length > 0 && currentGoogleQuery && currentGoogleQuery !== lastQuery && (
                     <div className="rounded-2xl border border-sky-200 bg-sky-50 p-4 text-xs text-slate-600">
                       현재 Google Books 결과는 자동 보강 검색 문구로 찾았습니다:{' '}
-                      <span className="font-semibold text-sky-700">{currentGoogleQuery}</span>
+                      <span className="font-semibold text-sky-700">{renderQueryWithPatterns(currentGoogleQuery, googleHighlightPatterns)}</span>
                     </div>
                   )}
 
@@ -722,14 +728,14 @@ export default function App() {
                           </div>
                           <div className="min-w-0 flex-1 space-y-2">
                             <div>
-                              <h4 className="line-clamp-2 text-base font-semibold text-slate-800">{highlightText(result.title, currentGoogleQuery)}</h4>
+                              <h4 className="line-clamp-2 text-base font-semibold text-slate-800">{highlightTextWithPatterns(result.title, googleHighlightPatterns)}</h4>
                               <p className="mt-1 text-sm text-slate-500">
                                 {result.authors.length > 0 ? result.authors.join(', ') : '저자 정보 없음'}
                                 {result.publishedDate ? ` · ${result.publishedDate}` : ''}
                               </p>
                             </div>
                             {result.snippet && (
-                              <p className="line-clamp-3 text-sm leading-relaxed text-slate-600">{highlightText(result.snippet, currentGoogleQuery)}</p>
+                              <p className="line-clamp-3 text-sm leading-relaxed text-slate-600">{highlightTextWithPatterns(result.snippet, googleHighlightPatterns)}</p>
                             )}
                             <div className="flex flex-wrap items-center gap-2 pt-1">
                               <a
