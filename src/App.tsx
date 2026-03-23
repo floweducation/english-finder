@@ -29,6 +29,7 @@ type GoogleBookResult = {
   snippet?: string;
   viewability?: string;
   accessViewStatus?: string;
+  webReaderLink?: string;
   previewAvailable: boolean;
 };
 
@@ -219,6 +220,7 @@ async function fetchGoogleBooks(query: string): Promise<GoogleBookResult[]> {
     snippet: stripHtml(item.snippet),
     viewability: item.viewability,
     accessViewStatus: item.accessViewStatus,
+    webReaderLink: item.webReaderLink,
     previewAvailable: Boolean(item.previewAvailable),
   }));
 }
@@ -232,6 +234,11 @@ async function fetchWorksheetMaker(query: string): Promise<WorksheetSearchRespon
   }
 
   return response.json();
+}
+
+function buildGoogleBooksSearchUrl(query: string) {
+  const normalized = sanitizeSearchQuery(query);
+  return `${GOOGLE_BOOKS_PAGE_URL}${encodeURIComponent(`"${normalized}"`)}`;
 }
 
 function openWorksheetMakerSearch(query: string) {
@@ -405,7 +412,7 @@ export default function App() {
 
   const openGoogleBooksPage = useCallback(() => {
     if (!normalizedPassage) return;
-    window.open(`${GOOGLE_BOOKS_PAGE_URL}${encodeURIComponent(`"${normalizedPassage}"`)}`, '_blank');
+    window.open(buildGoogleBooksSearchUrl(normalizedPassage), '_blank');
   }, [normalizedPassage]);
 
   const openWorksheetMakerPage = useCallback(() => {
@@ -558,7 +565,7 @@ export default function App() {
                 <div className="space-y-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
                   <div className="flex items-center justify-between gap-3">
                     <a
-                      href={currentGoogleQuery ? `${GOOGLE_BOOKS_PAGE_URL}${encodeURIComponent(`"${currentGoogleQuery}"`)}` : 'https://books.google.com/'}
+                      href={currentGoogleQuery ? buildGoogleBooksSearchUrl(currentGoogleQuery) : 'https://books.google.com/'}
                       target="_blank"
                       rel="noreferrer"
                       className="group flex items-center gap-2"
@@ -643,7 +650,7 @@ export default function App() {
 
                   {googleResults.length > 0 && hasGoogleBooksWithoutPreview && (
                     <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-500">
-                      일부 도서는 Google Books에서 본문 미리보기를 제공하지 않습니다. 이런 경우에는 도서 정보 버튼으로 확인해 주세요.
+                      미리보기가 확실한 경우에만 미리보기 버튼을 표시합니다. 그 외에는 Google Books 검색으로 이동해 확인할 수 있습니다.
                     </div>
                   )}
 
@@ -675,7 +682,7 @@ export default function App() {
                               <p className="line-clamp-3 text-sm leading-relaxed text-slate-600">{highlightText(result.snippet, currentGoogleQuery)}</p>
                             )}
                             <div className="flex flex-wrap items-center gap-2 pt-1">
-                              {result.previewAvailable && result.previewLink && (
+                              {result.previewAvailable && result.previewLink ? (
                                 <a
                                   href={result.previewLink}
                                   target="_blank"
@@ -683,6 +690,15 @@ export default function App() {
                                   className="rounded-full bg-indigo-50 px-3 py-1.5 text-xs font-medium text-indigo-700 transition-colors hover:bg-indigo-100"
                                 >
                                   미리보기
+                                </a>
+                              ) : (
+                                <a
+                                  href={buildGoogleBooksSearchUrl(currentGoogleQuery || lastQuery)}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="rounded-full bg-indigo-50 px-3 py-1.5 text-xs font-medium text-indigo-700 transition-colors hover:bg-indigo-100"
+                                >
+                                  Google Books 열기
                                 </a>
                               )}
                               {result.infoLink && (
@@ -698,7 +714,7 @@ export default function App() {
                             </div>
                             {!result.previewAvailable && (
                               <p className="text-xs text-slate-400">
-                                이 도서는 Google Books에서 본문 미리보기를 제공하지 않을 수 있습니다.
+                                미리보기가 확실하지 않아 Google Books 검색으로 바로 이동할 수 있게 표시했습니다.
                               </p>
                             )}
                           </div>
