@@ -49,8 +49,40 @@ const APP_HOME_URL = 'https://english-finder.vercel.app/';
 const MIN_WORKSHEET_WORDS = 3;
 
 const normalizePassage = (value: string) => value.replace(/\s+/g, ' ').trim();
-const countWords = (value: string) => normalizePassage(value).split(' ').filter(Boolean).length;
+const normalizeQuotes = (value: string) => value.replace(/[“”]/g, '"').replace(/[‘’]/g, "'");
+const sanitizeSearchQuery = (value: string) => {
+  const normalized = normalizePassage(normalizeQuotes(value));
+  return normalized.replace(/^["'`]+|["'`]+$/g, '').trim();
+};
+const countWords = (value: string) => sanitizeSearchQuery(value).split(' ').filter(Boolean).length;
 const stripHtml = (value?: string) => (value ?? '').replace(/<[^>]+>/g, '').trim();
+const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+function highlightText(text: string, query: string) {
+  const cleanText = text ?? '';
+  const cleanQuery = sanitizeSearchQuery(query);
+
+  if (!cleanText || !cleanQuery) {
+    return cleanText;
+  }
+
+  const regex = new RegExp(`(${escapeRegex(cleanQuery).replace(/ /g, '\\s+')})`, 'ig');
+  const parts = cleanText.split(regex);
+
+  if (parts.length === 1) {
+    return cleanText;
+  }
+
+  return parts.map((part, index) =>
+    part.match(regex) ? (
+      <mark key={`${part}-${index}`} className="rounded bg-amber-200/80 px-0.5 text-inherit">
+        {part}
+      </mark>
+    ) : (
+      <React.Fragment key={`${part}-${index}`}>{part}</React.Fragment>
+    ),
+  );
+}
 
 async function fetchGoogleBooks(query: string): Promise<GoogleBookResult[]> {
   const response = await fetch(`/api/google-books-search?q=${encodeURIComponent(query)}`);
@@ -86,7 +118,7 @@ async function fetchWorksheetMaker(query: string): Promise<WorksheetSearchRespon
 }
 
 function openWorksheetMakerSearch(query: string) {
-  const normalized = normalizePassage(query);
+  const normalized = sanitizeSearchQuery(query);
   if (!normalized) return;
 
   const form = document.createElement('form');
@@ -117,7 +149,7 @@ export default function App() {
   const [worksheetError, setWorksheetError] = useState('');
   const [worksheetNotice, setWorksheetNotice] = useState('');
 
-  const normalizedPassage = useMemo(() => normalizePassage(passage), [passage]);
+  const normalizedPassage = useMemo(() => sanitizeSearchQuery(passage), [passage]);
   const worksheetWordCount = useMemo(() => countWords(passage), [passage]);
 
   const handleUnifiedSearch = useCallback(async () => {
@@ -203,7 +235,7 @@ export default function App() {
           <section className="space-y-4 text-center">
             <h2 className="text-3xl font-bold text-slate-800">지문 원문 찾기</h2>
             <p className="mx-auto max-w-2xl text-slate-600">
-              수능이나 모의고사 영어 지문의 특징적인 문구를 넣으면 Google Books 및 WorksheetMaker 검색 결과를 한 번에 확인할 수 있습니다.
+              찾고 싶은 영어 지문의 특정 문구를 입력해 주세요. Google Books 및 WorksheetMaker 검색 결과를 한 번에 확인할 수 있습니다.
             </p>
           </section>
 
@@ -280,7 +312,7 @@ export default function App() {
                   <Check size={12} className="text-emerald-500" /> WorksheetMaker 출처 확인
                 </span>
               </div>
-              <div className="italic">검색어는 자동으로 정리된 뒤 사용됩니다.</div>
+              <div className="italic">입력한 검색어는 자동으로 정리되어 검색에 사용됩니다.</div>
             </div>
           </section>
 
@@ -351,14 +383,14 @@ export default function App() {
                           </div>
                           <div className="min-w-0 flex-1 space-y-2">
                             <div>
-                              <h4 className="line-clamp-2 text-base font-semibold text-slate-800">{result.title}</h4>
+                              <h4 className="line-clamp-2 text-base font-semibold text-slate-800">{highlightText(result.title, lastQuery || normalizedPassage)}</h4>
                               <p className="mt-1 text-sm text-slate-500">
                                 {result.authors.length > 0 ? result.authors.join(', ') : '저자 정보 없음'}
                                 {result.publishedDate ? ` · ${result.publishedDate}` : ''}
                               </p>
                             </div>
                             {result.snippet && (
-                              <p className="line-clamp-3 text-sm leading-relaxed text-slate-600">{result.snippet}</p>
+                              <p className="line-clamp-3 text-sm leading-relaxed text-slate-600">{highlightText(result.snippet, lastQuery || normalizedPassage)}</p>
                             )}
                             <div className="flex flex-wrap gap-2 pt-1">
                               {result.previewLink && (
@@ -464,7 +496,7 @@ export default function App() {
                         <div className="space-y-3">
                           <div>
                             <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-slate-400">영어 지문</p>
-                            <p className="whitespace-pre-line text-sm leading-6 text-slate-700">{result.passage}</p>
+                            <p className="whitespace-pre-line text-sm leading-6 text-slate-700">{highlightText(result.passage, lastQuery || normalizedPassage)}</p>
                           </div>
 
                           {result.sourceLines.length > 0 && (
@@ -473,7 +505,7 @@ export default function App() {
                               <ul className="space-y-1 text-sm text-slate-600">
                                 {result.sourceLines.map((line) => (
                                   <li key={line} className="rounded-xl bg-slate-50 px-3 py-2">
-                                    {line}
+                                    {highlightText(line, lastQuery || normalizedPassage)}
                                   </li>
                                 ))}
                               </ul>
