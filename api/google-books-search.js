@@ -43,9 +43,13 @@ export default async function handler(req, res) {
     const results = (data.items || []).map((item) => {
       const viewability = item.accessInfo?.viewability || 'UNKNOWN';
       const accessViewStatus = item.accessInfo?.accessViewStatus || 'NONE';
+      const webReaderLink = item.accessInfo?.webReaderLink;
+      const embeddable = Boolean(item.accessInfo?.embeddable);
+      const publicDomain = Boolean(item.accessInfo?.publicDomain);
       const previewAvailable =
-        ['PARTIAL', 'ALL_PAGES'].includes(viewability) ||
-        ['SAMPLE', 'FULL_PUBLIC_DOMAIN'].includes(accessViewStatus);
+        accessViewStatus === 'FULL_PUBLIC_DOMAIN' ||
+        (accessViewStatus === 'SAMPLE' && viewability === 'PARTIAL' && embeddable && Boolean(webReaderLink)) ||
+        (publicDomain && viewability === 'ALL_PAGES' && Boolean(webReaderLink));
 
       return {
         id: item.id,
@@ -55,6 +59,7 @@ export default async function handler(req, res) {
         thumbnail: item.volumeInfo?.imageLinks?.thumbnail,
         previewLink: item.volumeInfo?.previewLink,
         infoLink: item.volumeInfo?.infoLink,
+        webReaderLink,
         snippet: String(item.searchInfo?.textSnippet || '')
           .replace(/<[^>]+>/g, '')
           .trim(),
