@@ -43,6 +43,8 @@ type WorksheetSearchResponse = {
 
 const GOOGLE_BOOKS_PAGE_URL = 'https://www.google.com/search?tbm=bks&q=';
 const WORKSHEETMAKER_POST_URL = 'https://www.worksheetmaker.co.kr/user20/dataTexts/list.do';
+const WORKSHEETMAKER_HOME_URL = 'https://www.worksheetmaker.co.kr/';
+const FLOW_BLOG_URL = 'https://flowedu.tistory.com';
 const MIN_WORKSHEET_WORDS = 3;
 
 const normalizePassage = (value: string) => value.replace(/\s+/g, ' ').trim();
@@ -168,6 +170,8 @@ export default function App() {
     openWorksheetMakerSearch(normalizedPassage);
   }, [normalizedPassage]);
 
+  const displayedWorksheetResults = useMemo(() => worksheetResults?.results.slice(0, 2) ?? [], [worksheetResults]);
+
   const hasAnyResultsView = lastQuery || isSearching;
 
   return (
@@ -286,21 +290,26 @@ export default function App() {
                   <p className="text-sm font-semibold text-slate-700">최근 검색어</p>
                   <p className="mt-1 break-all text-lg font-bold text-slate-900">{lastQuery || normalizedPassage}</p>
                 </div>
-                <p className="text-sm text-slate-500">왼쪽은 Google Books 후보, 오른쪽은 WorksheetMaker 검색 결과입니다.</p>
+                <p className="text-sm text-slate-500">왼쪽은 Google Books, 오른쪽은 WorksheetMaker 검색 결과입니다.</p>
               </div>
 
               <div className="grid gap-6 xl:grid-cols-2">
                 <div className="space-y-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
                   <div className="flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-2">
-                      <div className="rounded-xl bg-blue-100 p-2 text-blue-700">
+                    <a
+                      href={lastQuery || normalizedPassage ? `${GOOGLE_BOOKS_PAGE_URL}${encodeURIComponent(`"${lastQuery || normalizedPassage}"`)}` : 'https://books.google.com/'}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="group flex items-center gap-2"
+                    >
+                      <div className="rounded-xl bg-blue-100 p-2 text-blue-700 transition-colors group-hover:bg-blue-200">
                         <BookOpen size={18} />
                       </div>
                       <div>
-                        <h3 className="font-semibold text-slate-800">Google Books</h3>
+                        <h3 className="font-semibold text-slate-800 group-hover:text-blue-700">Google Books</h3>
                         <p className="text-xs text-slate-500">원전 또는 유사 도서 후보</p>
                       </div>
-                    </div>
+                    </a>
                     <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">
                       {googleResults.length}건
                     </span>
@@ -381,18 +390,33 @@ export default function App() {
 
                 <div className="space-y-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
                   <div className="flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-2">
-                      <div className="rounded-xl bg-emerald-100 p-2 text-emerald-700">
+                    <a
+                      href={WORKSHEETMAKER_HOME_URL}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="group flex items-center gap-2"
+                    >
+                      <div className="rounded-xl bg-emerald-100 p-2 text-emerald-700 transition-colors group-hover:bg-emerald-200">
                         <FileSearch size={18} />
                       </div>
                       <div>
-                        <h3 className="font-semibold text-slate-800">WorksheetMaker</h3>
+                        <h3 className="font-semibold text-slate-800 group-hover:text-emerald-700">WorksheetMaker</h3>
                         <p className="text-xs text-slate-500">국내 교재·모의고사 출처 결과</p>
                       </div>
+                    </a>
+                    <div className="flex items-center gap-2">
+                      {lastQuery && !worksheetNotice && (
+                        <button
+                          onClick={openWorksheetMakerPage}
+                          className="rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700 transition-colors hover:bg-emerald-100"
+                        >
+                          전체 결과 새 창
+                        </button>
+                      )}
+                      <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">
+                        {worksheetResults?.resultCount ?? 0}건
+                      </span>
                     </div>
-                    <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">
-                      {worksheetResults?.resultCount ?? 0}건
-                    </span>
                   </div>
 
                   {worksheetNotice && (
@@ -415,8 +439,20 @@ export default function App() {
                     </div>
                   )}
 
+                  {worksheetResults?.results && worksheetResults.results.length > 2 && (
+                    <div className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+                      <span>처음 2개 결과만 표시합니다. 전체 결과는 WorksheetMaker 새 창에서 확인하세요.</span>
+                      <button
+                        onClick={openWorksheetMakerPage}
+                        className="shrink-0 rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700 transition-colors hover:bg-emerald-100"
+                      >
+                        전체 결과 열기
+                      </button>
+                    </div>
+                  )}
+
                   <div className="space-y-4">
-                    {worksheetResults?.results.map((result) => (
+                    {displayedWorksheetResults.map((result) => (
                       <article key={`${result.rank}-${result.sourceLines.join('|')}`} className="rounded-2xl border border-slate-200 p-4">
                         <div className="mb-3 flex items-center justify-between gap-3">
                           <span className="inline-flex rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
@@ -491,7 +527,7 @@ export default function App() {
       </main>
 
       <footer className="mx-auto mt-12 max-w-6xl border-t border-slate-200 px-6 py-12 text-center text-sm text-slate-400">
-        <p>© 2026 English Passage Source Finder. All rights reserved.</p>
+        <p>© 2026 <a href={FLOW_BLOG_URL} target="_blank" rel="noreferrer" className="font-medium text-slate-500 underline-offset-4 transition-colors hover:text-indigo-600 hover:underline">Flow 영어연구소</a>. All rights reserved.</p>
       </footer>
     </div>
   );
