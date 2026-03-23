@@ -307,7 +307,7 @@ export default function App() {
       isEnhancing ||
       googleResults.length > 0 ||
       !!googleError ||
-      worksheetResults?.resultCount !== 1 ||
+      (worksheetResults?.resultCount ?? 0) < 1 ||
       !worksheetResults.results[0]?.passage
     ) {
       return;
@@ -381,7 +381,7 @@ export default function App() {
     !googleError &&
     !!lastQuery &&
     googleResults.length === 0 &&
-    worksheetResults?.resultCount === 1 &&
+    (worksheetResults?.resultCount ?? 0) >= 1 &&
     !!worksheetResults.results[0]?.passage;
 
   return (
