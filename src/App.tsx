@@ -80,7 +80,14 @@ const sanitizeSearchQuery = (value: string) => {
   return normalized.replace(/^["'`]+|["'`]+$/g, '').trim();
 };
 const countWords = (value: string) => sanitizeSearchQuery(value).split(' ').filter(Boolean).length;
-const stripHtml = (value?: string) => (value ?? '').replace(/<[^>]+>/g, '').trim();
+const decodeHtmlEntities = (value: string) => value
+  .replace(/&#39;|&#x27;/gi, "'")
+  .replace(/&quot;/gi, '"')
+  .replace(/&amp;/gi, '&')
+  .replace(/&nbsp;/gi, ' ')
+  .replace(/&lt;/gi, '<')
+  .replace(/&gt;/gi, '>');
+const stripHtml = (value?: string) => decodeHtmlEntities((value ?? '').replace(/<[^>]+>/g, '')).trim();
 const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 const getQueryFromUrl = () => {
@@ -132,13 +139,26 @@ function highlightTextWithPatterns(text: string, patterns: HighlightPattern[]) {
     return cleanText;
   }
 
-  const regex = new RegExp(
-    `(${normalizedPatterns
-      .map((pattern) => escapeRegex(pattern.text).replace(/ /g, '\\s+'))
-      .join('|')})`,
-    'ig',
-  );
+  const separatorPattern = String.raw`(?:[\s,;:!?()[\]{}"“”‘’—–-]+)`;
+  const compiledPatterns = normalizedPatterns
+    .map((pattern) => {
+      const tokens = pattern.text.match(/[A-Za-z0-9]+(?:'[A-Za-z0-9]+)?/g) ?? [];
+      if (tokens.length === 0) return null;
 
+      const regexBody = tokens.map((token) => escapeRegex(token)).join(separatorPattern);
+      return {
+        ...pattern,
+        regexBody,
+        regex: new RegExp(`^${regexBody}$`, 'i'),
+      };
+    })
+    .filter(Boolean) as Array<HighlightPattern & { regexBody: string; regex: RegExp }>;
+
+  if (compiledPatterns.length === 0) {
+    return cleanText;
+  }
+
+  const regex = new RegExp(`(${compiledPatterns.map((pattern) => pattern.regexBody).join('|')})`, 'ig');
   const parts = cleanText.split(regex);
 
   if (parts.length === 1) {
@@ -146,8 +166,7 @@ function highlightTextWithPatterns(text: string, patterns: HighlightPattern[]) {
   }
 
   return parts.map((part, index) => {
-    const normalizedPart = sanitizeSearchQuery(part).toLowerCase();
-    const matchedPattern = normalizedPatterns.find((pattern) => pattern.text.toLowerCase() === normalizedPart);
+    const matchedPattern = compiledPatterns.find((pattern) => pattern.regex.test(part));
 
     if (matchedPattern) {
       return (
@@ -161,16 +180,14 @@ function highlightTextWithPatterns(text: string, patterns: HighlightPattern[]) {
   });
 }
 
-
 function renderQueryWithPatterns(text: string, patterns: HighlightPattern[]) {
   return <span className="break-words">{highlightTextWithPatterns(text, patterns)}</span>;
 }
 
 function extractEnhancementQueries(passage: string, originalQuery: string) {
   const originalNormalized = sanitizeSearchQuery(originalQuery).toLowerCase();
-  const normalizedPassage = sanitizeSearchQuery(stripHtml(passage))
+  const normalizedPassage = stripHtml(passage)
     .replace(/[＄$€£¥]/g, ' ')
-    .replace(/[—–]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 
@@ -206,41 +223,48 @@ function extractEnhancementQueries(passage: string, originalQuery: string) {
   };
 
   sentences.forEach((sentence, sentenceIndex) => {
-    const words = (sentence.match(/[A-Za-z]+(?:'[A-Za-z]+)?/g) ?? []).map((word) => word.trim());
+    const clauses = sentence
+      .split(/[,:;()\[\]{}—–-]+/)
+      .map((clause) => clause.trim())
+      .filter(Boolean);
 
-    if (words.length < 4) {
-      return;
-    }
+    clauses.forEach((clause) => {
+      const words = (clause.match(/[A-Za-z]+(?:'[A-Za-z]+)?/g) ?? []).map((word) => word.trim());
 
-    [5, 4, 3].forEach((windowSize) => {
-      if (words.length < windowSize) return;
-
-      for (let start = 0; start <= words.length - windowSize; start += 1) {
-        const windowWords = words.slice(start, start + windowSize);
-        const text = sanitizeSearchQuery(windowWords.join(' '));
-        const lowerText = text.toLowerCase();
-
-        if (!text || lowerText === originalNormalized) {
-          continue;
-        }
-
-        const uncommonCount = windowWords.filter((word) => {
-          const lower = word.toLowerCase();
-          return !STOP_WORDS.has(lower) && lower.length >= 5;
-        }).length;
-
-        if (uncommonCount < 2) {
-          continue;
-        }
-
-        const middleBonus = start > 0 && start + windowSize < words.length ? 0.8 : 0;
-        const sentencePenalty = sentenceIndex * 0.15;
-
-        candidates.push({
-          text,
-          score: scoreWords(windowWords) + middleBonus - sentencePenalty,
-        });
+      if (words.length < 6) {
+        return;
       }
+
+      [8, 7, 6].forEach((windowSize) => {
+        if (words.length < windowSize) return;
+
+        for (let start = 0; start <= words.length - windowSize; start += 1) {
+          const windowWords = words.slice(start, start + windowSize);
+          const text = sanitizeSearchQuery(windowWords.join(' '));
+          const lowerText = text.toLowerCase();
+
+          if (!text || lowerText === originalNormalized) {
+            continue;
+          }
+
+          const uncommonCount = windowWords.filter((word) => {
+            const lower = word.toLowerCase();
+            return !STOP_WORDS.has(lower) && lower.length >= 5;
+          }).length;
+
+          if (uncommonCount < 2) {
+            continue;
+          }
+
+          const middleBonus = start > 0 && start + windowSize < words.length ? 0.8 : 0;
+          const sentencePenalty = sentenceIndex * 0.15;
+
+          candidates.push({
+            text,
+            score: scoreWords(windowWords) + middleBonus - sentencePenalty,
+          });
+        }
+      });
     });
   });
 
