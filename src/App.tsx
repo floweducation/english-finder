@@ -27,6 +27,9 @@ type GoogleBookResult = {
   previewLink?: string;
   infoLink?: string;
   snippet?: string;
+  viewability?: string;
+  accessViewStatus?: string;
+  previewAvailable: boolean;
 };
 
 type WorksheetResult = {
@@ -214,6 +217,9 @@ async function fetchGoogleBooks(query: string): Promise<GoogleBookResult[]> {
     previewLink: item.previewLink,
     infoLink: item.infoLink,
     snippet: stripHtml(item.snippet),
+    viewability: item.viewability,
+    accessViewStatus: item.accessViewStatus,
+    previewAvailable: Boolean(item.previewAvailable),
   }));
 }
 
@@ -409,6 +415,7 @@ export default function App() {
   const displayedWorksheetResults = useMemo(() => worksheetResults?.results.slice(0, 2) ?? [], [worksheetResults]);
   const hasAnyResultsView = lastQuery || isSearching;
   const currentGoogleQuery = googleQueryUsed || lastQuery || normalizedPassage;
+  const hasGoogleBooksWithoutPreview = googleResults.some((result) => !result.previewAvailable);
   const canShowEnhancementButton =
     !isSearching &&
     !isEnhancing &&
@@ -634,6 +641,12 @@ export default function App() {
                     </div>
                   )}
 
+                  {googleResults.length > 0 && hasGoogleBooksWithoutPreview && (
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-500">
+                      일부 도서는 Google Books에서 본문 미리보기를 제공하지 않습니다. 이런 경우에는 도서 정보 버튼으로 확인해 주세요.
+                    </div>
+                  )}
+
                   <div className="space-y-4">
                     {googleResults.map((result) => (
                       <article key={result.id} className="rounded-2xl border border-slate-200 p-4">
@@ -661,8 +674,8 @@ export default function App() {
                             {result.snippet && (
                               <p className="line-clamp-3 text-sm leading-relaxed text-slate-600">{highlightText(result.snippet, currentGoogleQuery)}</p>
                             )}
-                            <div className="flex flex-wrap gap-2 pt-1">
-                              {result.previewLink && (
+                            <div className="flex flex-wrap items-center gap-2 pt-1">
+                              {result.previewAvailable && result.previewLink && (
                                 <a
                                   href={result.previewLink}
                                   target="_blank"
@@ -683,6 +696,11 @@ export default function App() {
                                 </a>
                               )}
                             </div>
+                            {!result.previewAvailable && (
+                              <p className="text-xs text-slate-400">
+                                이 도서는 Google Books에서 본문 미리보기를 제공하지 않을 수 있습니다.
+                              </p>
+                            )}
                           </div>
                         </div>
                       </article>
