@@ -80,14 +80,45 @@ const sanitizeSearchQuery = (value: string) => {
   return normalized.replace(/^["'`]+|["'`]+$/g, '').trim();
 };
 const countWords = (value: string) => sanitizeSearchQuery(value).split(' ').filter(Boolean).length;
-const decodeHtmlEntities = (value: string) => value
-  .replace(/&#39;|&#x27;/gi, "'")
-  .replace(/&quot;/gi, '"')
-  .replace(/&amp;/gi, '&')
-  .replace(/&nbsp;/gi, ' ')
-  .replace(/&lt;/gi, '<')
-  .replace(/&gt;/gi, '>');
-const stripHtml = (value?: string) => decodeHtmlEntities((value ?? '').replace(/<[^>]+>/g, '')).trim();
+const decodeHtmlEntities = (value: string) => {
+  let current = value ?? '';
+
+  if (!current) {
+    return '';
+  }
+
+  if (typeof document !== 'undefined') {
+    const textarea = document.createElement('textarea');
+
+    for (let index = 0; index < 5; index += 1) {
+      const previous = current;
+      textarea.innerHTML = current;
+      current = textarea.value;
+
+      if (current === previous) {
+        break;
+      }
+    }
+  }
+
+  return current
+    .replace(/&apos;/gi, "'")
+    .replace(/&#39;|&#x27;/gi, "'")
+    .replace(/&quot;/gi, '"')
+    .replace(/&amp;/gi, '&')
+    .replace(/&nbsp;|&#160;/gi, ' ')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/[’]/g, "'")
+    .replace(/[“”]/g, '"')
+    .replace(/ /g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+};
+const stripHtml = (value?: string) => {
+  const decoded = decodeHtmlEntities(value ?? '');
+  return decodeHtmlEntities(decoded.replace(/<[^>]+>/g, ' ')).trim();
+};
 const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 const getQueryFromUrl = () => {
@@ -200,7 +231,14 @@ function extractEnhancementQueries(passage: string, originalQuery: string) {
     .map((sentence) => sentence.trim())
     .filter(Boolean);
 
-  const candidates: Array<{ text: string; score: number }> = [];
+  type Candidate = {
+    text: string;
+    tokens: string[];
+    sentenceIndex: number;
+    score: number;
+  };
+
+  const candidates: Candidate[] = [];
 
   const scoreWords = (words: string[]) => {
     const uniqueWords = new Set(words.map((word) => word.toLowerCase()));
@@ -235,7 +273,7 @@ function extractEnhancementQueries(passage: string, originalQuery: string) {
         return;
       }
 
-      [8, 7, 6].forEach((windowSize) => {
+      [7, 6].forEach((windowSize) => {
         if (words.length < windowSize) return;
 
         for (let start = 0; start <= words.length - windowSize; start += 1) {
@@ -256,12 +294,14 @@ function extractEnhancementQueries(passage: string, originalQuery: string) {
             continue;
           }
 
-          const middleBonus = start > 0 && start + windowSize < words.length ? 0.8 : 0;
-          const sentencePenalty = sentenceIndex * 0.15;
+          const clauseMiddleBonus = start > 0 && start + windowSize < words.length ? 0.5 : 0;
+          const sentencePenalty = sentenceIndex * 0.12;
 
           candidates.push({
             text,
-            score: scoreWords(windowWords) + middleBonus - sentencePenalty,
+            tokens: windowWords.map((word) => word.toLowerCase()),
+            sentenceIndex,
+            score: scoreWords(windowWords) + clauseMiddleBonus - sentencePenalty,
           });
         }
       });
@@ -276,7 +316,55 @@ function extractEnhancementQueries(passage: string, originalQuery: string) {
     ).values(),
   );
 
-  return deduped.slice(0, MAX_ENHANCEMENT_RETRIES).map((candidate) => candidate.text);
+  const overlapRatio = (left: string[], right: string[]) => {
+    const leftSet = new Set(left);
+    const rightSet = new Set(right);
+    const intersection = Array.from(leftSet).filter((token) => rightSet.has(token)).length;
+    return intersection / Math.max(Math.min(leftSet.size, rightSet.size), 1);
+  };
+
+  const selected: Candidate[] = [];
+  const usedSentences = new Set<number>();
+
+  for (const candidate of deduped) {
+    const tooSimilar = selected.some((picked) => {
+      if (picked.text.toLowerCase().includes(candidate.text.toLowerCase())) return true;
+      if (candidate.text.toLowerCase().includes(picked.text.toLowerCase())) return true;
+      return overlapRatio(picked.tokens, candidate.tokens) >= 0.66;
+    });
+
+    if (tooSimilar) {
+      continue;
+    }
+
+    if (!usedSentences.has(candidate.sentenceIndex)) {
+      selected.push(candidate);
+      usedSentences.add(candidate.sentenceIndex);
+    }
+
+    if (selected.length === MAX_ENHANCEMENT_RETRIES) {
+      break;
+    }
+  }
+
+  if (selected.length < MAX_ENHANCEMENT_RETRIES) {
+    for (const candidate of deduped) {
+      const alreadySelected = selected.some((picked) => picked.text.toLowerCase() === candidate.text.toLowerCase());
+      const tooSimilar = selected.some((picked) => overlapRatio(picked.tokens, candidate.tokens) >= 0.66);
+
+      if (alreadySelected || tooSimilar) {
+        continue;
+      }
+
+      selected.push(candidate);
+
+      if (selected.length === MAX_ENHANCEMENT_RETRIES) {
+        break;
+      }
+    }
+  }
+
+  return selected.slice(0, MAX_ENHANCEMENT_RETRIES).map((candidate) => candidate.text);
 }
 
 async function fetchGoogleBooks(query: string): Promise<GoogleBookResult[]> {
