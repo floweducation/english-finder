@@ -233,7 +233,17 @@ export default function App() {
           className="space-y-8"
         >
           <section className="space-y-4 text-center">
-            <h2 className="text-3xl font-bold text-slate-800">지문 원문 찾기</h2>
+            <div className="flex flex-wrap items-baseline justify-center gap-x-2 gap-y-1">
+              <h2 className="text-3xl font-bold text-slate-800">지문 원문 찾기</h2>
+              <a
+                href={FLOW_BLOG_URL}
+                target="_blank"
+                rel="noreferrer"
+                className="text-sm font-serif italic tracking-wide text-slate-500 transition-colors hover:text-indigo-600"
+              >
+                by Flow 영어연구소
+              </a>
+            </div>
             <p className="mx-auto max-w-2xl text-slate-600">
               찾고 싶은 영어 지문의 특정 문구를 입력해 주세요. Google Books 및 WorksheetMaker 검색 결과를 한 번에 확인할 수 있습니다.
             </p>
