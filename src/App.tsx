@@ -650,7 +650,7 @@ export default function App() {
 
                   {googleResults.length > 0 && hasGoogleBooksWithoutPreview && (
                     <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-500">
-                      미리보기가 확실한 경우에만 미리보기 버튼을 표시합니다. 그 외에는 Google Books 검색으로 이동해 확인할 수 있습니다.
+                      공개 전체보기로 확인된 경우에만 전체 미리보기 버튼을 표시합니다. 그 외에는 Google Books 검색으로 이동해 확인할 수 있습니다.
                     </div>
                   )}
 
@@ -689,7 +689,7 @@ export default function App() {
                                   rel="noreferrer"
                                   className="rounded-full bg-indigo-50 px-3 py-1.5 text-xs font-medium text-indigo-700 transition-colors hover:bg-indigo-100"
                                 >
-                                  미리보기
+                                  전체 미리보기
                                 </a>
                               ) : (
                                 <a
@@ -714,7 +714,7 @@ export default function App() {
                             </div>
                             {!result.previewAvailable && (
                               <p className="text-xs text-slate-400">
-                                미리보기가 확실하지 않아 Google Books 검색으로 바로 이동할 수 있게 표시했습니다.
+                                공개 전체보기 여부가 확실하지 않아 Google Books 검색으로 바로 이동할 수 있게 표시했습니다.
                               </p>
                             )}
                           </div>
