@@ -239,7 +239,7 @@ export default function App() {
                 href={FLOW_BLOG_URL}
                 target="_blank"
                 rel="noreferrer"
-                className="text-sm font-serif italic tracking-wide text-slate-500 transition-colors hover:text-indigo-600"
+                className="text-sm font-medium text-slate-500 transition-colors hover:text-indigo-600"
               >
                 by Flow 영어연구소
               </a>
