@@ -45,6 +45,7 @@ const GOOGLE_BOOKS_PAGE_URL = 'https://www.google.com/search?tbm=bks&q=';
 const WORKSHEETMAKER_POST_URL = 'https://www.worksheetmaker.co.kr/user20/dataTexts/list.do';
 const WORKSHEETMAKER_HOME_URL = 'https://www.worksheetmaker.co.kr/';
 const FLOW_BLOG_URL = 'https://flowedu.tistory.com';
+const APP_HOME_URL = 'https://english-finder.vercel.app/';
 const MIN_WORKSHEET_WORDS = 3;
 
 const normalizePassage = (value: string) => value.replace(/\s+/g, ' ').trim();
@@ -178,7 +179,7 @@ export default function App() {
     <div className="min-h-screen bg-[#f8f9fa] text-slate-900 font-sans selection:bg-indigo-100">
       <header className="sticky top-0 z-10 border-b border-slate-200 bg-white/90 backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
-          <div className="flex items-center gap-3">
+          <a href={APP_HOME_URL} className="flex items-center gap-3">
             <div className="rounded-xl bg-indigo-600 p-2.5 text-white shadow-lg shadow-indigo-200">
               <BookOpen size={24} />
             </div>
@@ -188,7 +189,7 @@ export default function App() {
                 Google Books + WorksheetMaker
               </p>
             </div>
-          </div>
+          </a>
         </div>
       </header>
 
@@ -202,7 +203,7 @@ export default function App() {
           <section className="space-y-4 text-center">
             <h2 className="text-3xl font-bold text-slate-800">지문 원문 찾기</h2>
             <p className="mx-auto max-w-2xl text-slate-600">
-              영어 지문의 특징적인 문구를 넣으면 Google Books 후보와 WorksheetMaker 검색 결과를 한 번에 확인할 수 있습니다.
+              수능이나 모의고사 영어 지문의 특징적인 문구를 넣으면 Google Books 및 WorksheetMaker 검색 결과를 한 번에 확인할 수 있습니다.
             </p>
           </section>
 
