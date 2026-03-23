@@ -44,12 +44,11 @@ export default async function handler(req, res) {
       const viewability = item.accessInfo?.viewability || 'UNKNOWN';
       const accessViewStatus = item.accessInfo?.accessViewStatus || 'NONE';
       const webReaderLink = item.accessInfo?.webReaderLink;
-      const embeddable = Boolean(item.accessInfo?.embeddable);
       const publicDomain = Boolean(item.accessInfo?.publicDomain);
+      const previewLink = item.volumeInfo?.previewLink;
       const previewAvailable =
         accessViewStatus === 'FULL_PUBLIC_DOMAIN' ||
-        (accessViewStatus === 'SAMPLE' && viewability === 'PARTIAL' && embeddable && Boolean(webReaderLink)) ||
-        (publicDomain && viewability === 'ALL_PAGES' && Boolean(webReaderLink));
+        (publicDomain && viewability === 'ALL_PAGES' && Boolean(webReaderLink) && Boolean(previewLink));
 
       return {
         id: item.id,
@@ -57,7 +56,7 @@ export default async function handler(req, res) {
         authors: item.volumeInfo?.authors || [],
         publishedDate: item.volumeInfo?.publishedDate,
         thumbnail: item.volumeInfo?.imageLinks?.thumbnail,
-        previewLink: item.volumeInfo?.previewLink,
+        previewLink,
         infoLink: item.volumeInfo?.infoLink,
         webReaderLink,
         snippet: String(item.searchInfo?.textSnippet || '')
