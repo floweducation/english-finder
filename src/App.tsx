@@ -51,9 +51,9 @@ const WORKSHEETMAKER_POST_URL = 'https://www.worksheetmaker.co.kr/user20/dataTex
 const WORKSHEETMAKER_HOME_URL = 'https://www.worksheetmaker.co.kr/';
 const FLOW_BLOG_URL = 'https://flowedu.tistory.com';
 const APP_HOME_URL = 'https://english-finder.vercel.app/';
-const BRAND_LINK_CLASS = 'inline-flex items-center rounded-md px-2 py-1 text-sm font-medium text-sky-700 transition-colors hover:bg-sky-50 hover:text-sky-800';
+const BRAND_LINK_CLASS = 'inline-flex items-center rounded-md px-1.5 py-0.5 text-sm font-medium text-sky-700 transition-colors hover:bg-sky-50 hover:text-sky-800';
 const MIN_WORKSHEET_WORDS = 3;
-const MAX_ENHANCEMENT_RETRIES = 3;
+const MAX_ENHANCEMENT_RETRIES = 4;
 
 const STOP_WORDS = new Set([
   'a', 'about', 'above', 'after', 'again', 'against', 'all', 'almost', 'along', 'already', 'also', 'am', 'an',
@@ -153,11 +153,11 @@ function extractEnhancementQueries(passage: string, originalQuery: string) {
   sentences.forEach((sentence, sentenceIndex) => {
     const words = (sentence.match(/[A-Za-z]+(?:'[A-Za-z]+)?/g) ?? []).map((word) => word.trim());
 
-    if (words.length < 6) {
+    if (words.length < 4) {
       return;
     }
 
-    [10, 9, 8, 7, 6].forEach((windowSize) => {
+    [5, 4, 3].forEach((windowSize) => {
       if (words.length < windowSize) return;
 
       for (let start = 0; start <= words.length - windowSize; start += 1) {
@@ -420,7 +420,7 @@ export default function App() {
     openWorksheetMakerSearch(normalizedPassage);
   }, [normalizedPassage]);
 
-  const displayedWorksheetResults = useMemo(() => worksheetResults?.results.slice(0, 2) ?? [], [worksheetResults]);
+  const displayedWorksheetResults = useMemo(() => worksheetResults?.results.slice(0, 1) ?? [], [worksheetResults]);
   const hasAnyResultsView = lastQuery || isSearching;
   const currentGoogleQuery = googleQueryUsed || lastQuery || normalizedPassage;
   const canShowEnhancementButton =
@@ -458,9 +458,9 @@ export default function App() {
           className="space-y-8"
         >
           <section className="space-y-4 text-center">
-            <div className="flex flex-wrap items-baseline justify-center gap-x-2 gap-y-1">
+            <div className="flex flex-wrap items-baseline justify-center gap-x-1.5 gap-y-1">
               <h2 className="text-3xl font-bold text-slate-800">지문 원문 찾기</h2>
-              <span className="text-sm text-slate-500">by</span>
+              <span className="inline-flex items-center rounded-md px-1.5 py-0.5 text-sm font-medium text-sky-700/80">by</span>
               <a
                 href={FLOW_BLOG_URL}
                 target="_blank"
@@ -626,7 +626,7 @@ export default function App() {
                             <div>
                               <p className="font-semibold text-slate-700">자동 보강 검색</p>
                               <p className="mt-1 text-xs leading-5 text-slate-500">
-                                WorksheetMaker 1번 지문에서 특징적인 구간을 추출해 Google Books를 최대 {MAX_ENHANCEMENT_RETRIES}회 추가 검색합니다.
+                                WorksheetMaker 1번 지문에서 더 짧고 특징적인 구간을 추출해 Google Books를 최대 {MAX_ENHANCEMENT_RETRIES}회 추가 검색합니다.
                               </p>
                             </div>
                             <button
@@ -762,7 +762,7 @@ export default function App() {
 
                   {worksheetResults?.results && worksheetResults.results.length > 2 && (
                     <div className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
-                      <span>처음 2개 결과만 표시합니다. 전체 결과는 WorksheetMaker 새 창에서 확인하세요.</span>
+                      <span>처음 1개 결과만 표시합니다. 전체 결과는 WorksheetMaker 새 창에서 확인하세요.</span>
                       <button
                         onClick={openWorksheetMakerPage}
                         className="shrink-0 rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700 transition-colors hover:bg-emerald-100"
