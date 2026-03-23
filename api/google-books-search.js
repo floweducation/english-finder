@@ -4,7 +4,7 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method Not Allowed' });
   }
 
-  const query = sanitizeSearchQuery(req.query.q || '');
+  const query = String(req.query.q || '').trim();
 
   if (!query) {
     return res.status(400).json({ error: '검색어가 비어 있습니다.' });
@@ -40,18 +40,29 @@ export default async function handler(req, res) {
       });
     }
 
-    const results = (data.items || []).map((item) => ({
-      id: item.id,
-      title: item.volumeInfo?.title || '제목 없음',
-      authors: item.volumeInfo?.authors || [],
-      publishedDate: item.volumeInfo?.publishedDate,
-      thumbnail: item.volumeInfo?.imageLinks?.thumbnail,
-      previewLink: item.volumeInfo?.previewLink,
-      infoLink: item.volumeInfo?.infoLink,
-      snippet: String(item.searchInfo?.textSnippet || '')
-        .replace(/<[^>]+>/g, '')
-        .trim(),
-    }));
+    const results = (data.items || []).map((item) => {
+      const viewability = item.accessInfo?.viewability || 'UNKNOWN';
+      const accessViewStatus = item.accessInfo?.accessViewStatus || 'NONE';
+      const previewAvailable =
+        ['PARTIAL', 'ALL_PAGES'].includes(viewability) ||
+        ['SAMPLE', 'FULL_PUBLIC_DOMAIN'].includes(accessViewStatus);
+
+      return {
+        id: item.id,
+        title: item.volumeInfo?.title || '제목 없음',
+        authors: item.volumeInfo?.authors || [],
+        publishedDate: item.volumeInfo?.publishedDate,
+        thumbnail: item.volumeInfo?.imageLinks?.thumbnail,
+        previewLink: item.volumeInfo?.previewLink,
+        infoLink: item.volumeInfo?.infoLink,
+        snippet: String(item.searchInfo?.textSnippet || '')
+          .replace(/<[^>]+>/g, '')
+          .trim(),
+        viewability,
+        accessViewStatus,
+        previewAvailable,
+      };
+    });
 
     res.setHeader('Cache-Control', 's-maxage=3600, stale-while-revalidate=86400');
     return res.status(200).json({
@@ -64,15 +75,4 @@ export default async function handler(req, res) {
       error: error instanceof Error ? error.message : 'Google Books 검색 중 오류가 발생했습니다.',
     });
   }
-}
-
-
-function sanitizeSearchQuery(value) {
-  return String(value ?? '')
-    .replace(/[“”]/g, '"')
-    .replace(/[‘’]/g, "'")
-    .replace(/\s+/g, ' ')
-    .trim()
-    .replace(/^["'`]+|["'`]+$/g, '')
-    .trim();
 }
