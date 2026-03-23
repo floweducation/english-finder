@@ -8,7 +8,7 @@ export default async function handler(req, res) {
     return;
   }
 
-  const query = String(req.query.q ?? '').trim();
+  const query = sanitizeSearchQuery(req.query.q ?? '');
   if (!query) {
     res.status(400).json({ error: '검색어가 비어 있습니다.' });
     return;
@@ -153,4 +153,15 @@ function normalizeWhitespace(value) {
 
 function escapeRegex(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+
+function sanitizeSearchQuery(value) {
+  return String(value ?? '')
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/^["'`]+|["'`]+$/g, '')
+    .trim();
 }
