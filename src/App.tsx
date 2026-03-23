@@ -236,6 +236,7 @@ function extractEnhancementQueries(passage: string, originalQuery: string) {
     tokens: string[];
     sentenceIndex: number;
     score: number;
+    hasApostrophe: boolean;
   };
 
   const candidates: Candidate[] = [];
@@ -250,13 +251,15 @@ function extractEnhancementQueries(passage: string, originalQuery: string) {
     const startsWithStopWord = STOP_WORDS.has(words[0]?.toLowerCase() ?? '');
     const endsWithStopWord = STOP_WORDS.has(words[words.length - 1]?.toLowerCase() ?? '');
     const averageLength = words.reduce((sum, word) => sum + word.length, 0) / words.length;
+    const apostrophePenalty = words.some((word) => word.includes("'")) ? 2.4 : 0;
 
     return (
       uncommonWords.length * 3 +
       uniqueWords.size * 0.7 +
       averageLength -
       (startsWithStopWord ? 0.8 : 0) -
-      (endsWithStopWord ? 0.8 : 0)
+      (endsWithStopWord ? 0.8 : 0) -
+      apostrophePenalty
     );
   };
 
@@ -296,12 +299,14 @@ function extractEnhancementQueries(passage: string, originalQuery: string) {
 
           const clauseMiddleBonus = start > 0 && start + windowSize < words.length ? 0.5 : 0;
           const sentencePenalty = sentenceIndex * 0.12;
+          const hasApostrophe = windowWords.some((word) => word.includes("'"));
 
           candidates.push({
             text,
             tokens: windowWords.map((word) => word.toLowerCase()),
             sentenceIndex,
             score: scoreWords(windowWords) + clauseMiddleBonus - sentencePenalty,
+            hasApostrophe,
           });
         }
       });
@@ -311,7 +316,12 @@ function extractEnhancementQueries(passage: string, originalQuery: string) {
   const deduped = Array.from(
     new Map(
       candidates
-        .sort((a, b) => b.score - a.score)
+        .sort((a, b) => {
+          if (a.hasApostrophe !== b.hasApostrophe) {
+            return Number(a.hasApostrophe) - Number(b.hasApostrophe);
+          }
+          return b.score - a.score;
+        })
         .map((candidate) => [candidate.text.toLowerCase(), candidate]),
     ).values(),
   );
@@ -323,46 +333,48 @@ function extractEnhancementQueries(passage: string, originalQuery: string) {
     return intersection / Math.max(Math.min(leftSet.size, rightSet.size), 1);
   };
 
-  const selected: Candidate[] = [];
-  const usedSentences = new Set<number>();
-
-  for (const candidate of deduped) {
+  const pushCandidate = (selected: Candidate[], candidate: Candidate) => {
+    const alreadySelected = selected.some((picked) => picked.text.toLowerCase() === candidate.text.toLowerCase());
     const tooSimilar = selected.some((picked) => {
       if (picked.text.toLowerCase().includes(candidate.text.toLowerCase())) return true;
       if (candidate.text.toLowerCase().includes(picked.text.toLowerCase())) return true;
       return overlapRatio(picked.tokens, candidate.tokens) >= 0.66;
     });
 
-    if (tooSimilar) {
-      continue;
+    if (alreadySelected || tooSimilar) {
+      return false;
     }
 
-    if (!usedSentences.has(candidate.sentenceIndex)) {
-      selected.push(candidate);
-      usedSentences.add(candidate.sentenceIndex);
-    }
+    selected.push(candidate);
+    return true;
+  };
 
-    if (selected.length === MAX_ENHANCEMENT_RETRIES) {
-      break;
-    }
-  }
+  const selected: Candidate[] = [];
+  const apostropheFreeCandidates = deduped.filter((candidate) => !candidate.hasApostrophe);
+  const apostropheCandidates = deduped.filter((candidate) => candidate.hasApostrophe);
 
-  if (selected.length < MAX_ENHANCEMENT_RETRIES) {
-    for (const candidate of deduped) {
-      const alreadySelected = selected.some((picked) => picked.text.toLowerCase() === candidate.text.toLowerCase());
-      const tooSimilar = selected.some((picked) => overlapRatio(picked.tokens, candidate.tokens) >= 0.66);
+  const selectFromPool = (pool: Candidate[], preferUniqueSentences: boolean) => {
+    const usedSentences = new Set(selected.map((candidate) => candidate.sentenceIndex));
 
-      if (alreadySelected || tooSimilar) {
+    for (const candidate of pool) {
+      if (preferUniqueSentences && usedSentences.has(candidate.sentenceIndex)) {
         continue;
       }
 
-      selected.push(candidate);
+      if (pushCandidate(selected, candidate)) {
+        usedSentences.add(candidate.sentenceIndex);
+      }
 
       if (selected.length === MAX_ENHANCEMENT_RETRIES) {
         break;
       }
     }
-  }
+  };
+
+  selectFromPool(apostropheFreeCandidates, true);
+  if (selected.length < MAX_ENHANCEMENT_RETRIES) selectFromPool(apostropheFreeCandidates, false);
+  if (selected.length < MAX_ENHANCEMENT_RETRIES) selectFromPool(apostropheCandidates, true);
+  if (selected.length < MAX_ENHANCEMENT_RETRIES) selectFromPool(apostropheCandidates, false);
 
   return selected.slice(0, MAX_ENHANCEMENT_RETRIES).map((candidate) => candidate.text);
 }
@@ -778,7 +790,7 @@ export default function App() {
                               <p className="text-xs font-semibold uppercase tracking-wider text-indigo-500">시도한 검색 문구</p>
                               <ul className="mt-1 space-y-1 text-xs text-indigo-600">
                                 {enhancementAttempts.map((attempt) => (
-                                  <li key={attempt}>• {renderQueryWithPatterns(attempt, googleHighlightPatterns)}</li>
+                                  <li key={attempt}>• {attempt}</li>
                                 ))}
                               </ul>
                             </div>
@@ -818,7 +830,7 @@ export default function App() {
                   {googleResults.length > 0 && currentGoogleQuery && currentGoogleQuery !== lastQuery && (
                     <div className="rounded-2xl border border-sky-200 bg-sky-50 p-4 text-xs text-slate-600">
                       현재 Google Books 결과는 자동 보강 검색 문구로 찾았습니다:{' '}
-                      <span className="font-semibold text-sky-700">{renderQueryWithPatterns(currentGoogleQuery, googleHighlightPatterns)}</span>
+                      <span className="font-semibold text-sky-700">{currentGoogleQuery}</span>
                     </div>
                   )}
 
