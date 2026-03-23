@@ -4,7 +4,7 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method Not Allowed' });
   }
 
-  const query = String(req.query.q || '').trim();
+  const query = sanitizeSearchQuery(req.query.q || '');
 
   if (!query) {
     return res.status(400).json({ error: '검색어가 비어 있습니다.' });
@@ -64,4 +64,15 @@ export default async function handler(req, res) {
       error: error instanceof Error ? error.message : 'Google Books 검색 중 오류가 발생했습니다.',
     });
   }
+}
+
+
+function sanitizeSearchQuery(value) {
+  return String(value ?? '')
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/^["'`]+|["'`]+$/g, '')
+    .trim();
 }
