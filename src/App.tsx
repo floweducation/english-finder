@@ -249,7 +249,7 @@ export default function App() {
             </p>
           </section>
 
-          <section className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+          <section className="rounded-3xl border border-slate-200 bg-white shadow-sm">
             <div className="space-y-5 p-6">
               <div className="flex items-center justify-between gap-3">
                 <label htmlFor="passage-input" className="flex items-center gap-2 text-sm font-semibold text-slate-700">
