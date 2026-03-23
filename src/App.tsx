@@ -14,6 +14,7 @@ import {
   Info,
   LoaderCircle,
   Search,
+  Sparkles,
 } from 'lucide-react';
 import { motion } from 'motion/react';
 
@@ -47,6 +48,20 @@ const WORKSHEETMAKER_HOME_URL = 'https://www.worksheetmaker.co.kr/';
 const FLOW_BLOG_URL = 'https://flowedu.tistory.com';
 const APP_HOME_URL = 'https://english-finder.vercel.app/';
 const MIN_WORKSHEET_WORDS = 3;
+const MAX_ENHANCEMENT_RETRIES = 3;
+
+const STOP_WORDS = new Set([
+  'a', 'about', 'above', 'after', 'again', 'against', 'all', 'almost', 'along', 'already', 'also', 'am', 'an',
+  'and', 'any', 'are', 'as', 'at', 'be', 'because', 'been', 'before', 'being', 'below', 'between', 'both', 'but',
+  'by', 'can', 'could', 'did', 'do', 'does', 'doing', 'down', 'during', 'each', 'even', 'few', 'for', 'from',
+  'further', 'had', 'has', 'have', 'having', 'he', 'her', 'here', 'hers', 'herself', 'him', 'himself', 'his', 'how',
+  'i', 'if', 'in', 'into', 'is', 'it', 'its', 'itself', 'just', 'me', 'more', 'most', 'my', 'myself', 'no', 'nor',
+  'not', 'now', 'of', 'off', 'on', 'once', 'only', 'or', 'other', 'our', 'ours', 'ourselves', 'out', 'over', 'own',
+  'same', 'she', 'should', 'so', 'some', 'such', 'than', 'that', 'the', 'their', 'theirs', 'them', 'themselves',
+  'then', 'there', 'these', 'they', 'this', 'those', 'through', 'to', 'too', 'under', 'until', 'up', 'very', 'was',
+  'we', 'were', 'what', 'when', 'where', 'which', 'while', 'who', 'whom', 'why', 'will', 'with', 'would', 'you',
+  'your', 'yours', 'yourself', 'yourselves',
+]);
 
 const normalizePassage = (value: string) => value.replace(/\s+/g, ' ').trim();
 const normalizeQuotes = (value: string) => value.replace(/[“”]/g, '"').replace(/[‘’]/g, "'");
@@ -82,6 +97,95 @@ function highlightText(text: string, query: string) {
       <React.Fragment key={`${part}-${index}`}>{part}</React.Fragment>
     ),
   );
+}
+
+function extractEnhancementQueries(passage: string, originalQuery: string) {
+  const originalNormalized = sanitizeSearchQuery(originalQuery).toLowerCase();
+  const normalizedPassage = sanitizeSearchQuery(stripHtml(passage))
+    .replace(/[＄$€£¥]/g, ' ')
+    .replace(/[—–]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!normalizedPassage) {
+    return [];
+  }
+
+  const sentences = normalizedPassage
+    .split(/(?<=[.!?])\s+/)
+    .map((sentence) => sentence.trim())
+    .filter(Boolean);
+
+  const candidates: Array<{ text: string; score: number }> = [];
+
+  const scoreWords = (words: string[]) => {
+    const uniqueWords = new Set(words.map((word) => word.toLowerCase()));
+    const uncommonWords = words.filter((word) => {
+      const lower = word.toLowerCase();
+      return !STOP_WORDS.has(lower) && lower.length >= 5;
+    });
+
+    const startsWithStopWord = STOP_WORDS.has(words[0]?.toLowerCase() ?? '');
+    const endsWithStopWord = STOP_WORDS.has(words[words.length - 1]?.toLowerCase() ?? '');
+    const averageLength = words.reduce((sum, word) => sum + word.length, 0) / words.length;
+
+    return (
+      uncommonWords.length * 3 +
+      uniqueWords.size * 0.7 +
+      averageLength -
+      (startsWithStopWord ? 0.8 : 0) -
+      (endsWithStopWord ? 0.8 : 0)
+    );
+  };
+
+  sentences.forEach((sentence, sentenceIndex) => {
+    const words = (sentence.match(/[A-Za-z]+(?:'[A-Za-z]+)?/g) ?? []).map((word) => word.trim());
+
+    if (words.length < 6) {
+      return;
+    }
+
+    [10, 9, 8, 7, 6].forEach((windowSize) => {
+      if (words.length < windowSize) return;
+
+      for (let start = 0; start <= words.length - windowSize; start += 1) {
+        const windowWords = words.slice(start, start + windowSize);
+        const text = sanitizeSearchQuery(windowWords.join(' '));
+        const lowerText = text.toLowerCase();
+
+        if (!text || lowerText === originalNormalized) {
+          continue;
+        }
+
+        const uncommonCount = windowWords.filter((word) => {
+          const lower = word.toLowerCase();
+          return !STOP_WORDS.has(lower) && lower.length >= 5;
+        }).length;
+
+        if (uncommonCount < 2) {
+          continue;
+        }
+
+        const middleBonus = start > 0 && start + windowSize < words.length ? 0.8 : 0;
+        const sentencePenalty = sentenceIndex * 0.15;
+
+        candidates.push({
+          text,
+          score: scoreWords(windowWords) + middleBonus - sentencePenalty,
+        });
+      }
+    });
+  });
+
+  const deduped = Array.from(
+    new Map(
+      candidates
+        .sort((a, b) => b.score - a.score)
+        .map((candidate) => [candidate.text.toLowerCase(), candidate]),
+    ).values(),
+  );
+
+  return deduped.slice(0, MAX_ENHANCEMENT_RETRIES).map((candidate) => candidate.text);
 }
 
 async function fetchGoogleBooks(query: string): Promise<GoogleBookResult[]> {
@@ -142,12 +246,16 @@ export default function App() {
   const [passage, setPassage] = useState('');
   const [copied, setCopied] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
+  const [isEnhancing, setIsEnhancing] = useState(false);
   const [lastQuery, setLastQuery] = useState('');
+  const [googleQueryUsed, setGoogleQueryUsed] = useState('');
   const [googleResults, setGoogleResults] = useState<GoogleBookResult[]>([]);
   const [worksheetResults, setWorksheetResults] = useState<WorksheetSearchResponse | null>(null);
   const [googleError, setGoogleError] = useState('');
   const [worksheetError, setWorksheetError] = useState('');
   const [worksheetNotice, setWorksheetNotice] = useState('');
+  const [enhancementMessage, setEnhancementMessage] = useState('');
+  const [enhancementAttempts, setEnhancementAttempts] = useState<string[]>([]);
 
   const normalizedPassage = useMemo(() => sanitizeSearchQuery(passage), [passage]);
   const worksheetWordCount = useMemo(() => countWords(passage), [passage]);
@@ -157,14 +265,20 @@ export default function App() {
 
     setIsSearching(true);
     setLastQuery(normalizedPassage);
+    setGoogleQueryUsed(normalizedPassage);
     setGoogleResults([]);
     setWorksheetResults(null);
     setGoogleError('');
     setWorksheetError('');
     setWorksheetNotice('');
+    setEnhancementMessage('');
+    setEnhancementAttempts([]);
 
     const googleTask = fetchGoogleBooks(normalizedPassage)
-      .then((results) => setGoogleResults(results))
+      .then((results) => {
+        setGoogleResults(results);
+        setGoogleQueryUsed(normalizedPassage);
+      })
       .catch((error) => {
         console.error(error);
         setGoogleError('Google Books 결과를 불러오지 못했습니다.');
@@ -187,6 +301,61 @@ export default function App() {
     setIsSearching(false);
   }, [normalizedPassage, worksheetWordCount]);
 
+  const handleAutoEnhance = useCallback(async () => {
+    if (
+      isSearching ||
+      isEnhancing ||
+      googleResults.length > 0 ||
+      !!googleError ||
+      worksheetResults?.resultCount !== 1 ||
+      !worksheetResults.results[0]?.passage
+    ) {
+      return;
+    }
+
+    const enhancementQueries = extractEnhancementQueries(worksheetResults.results[0].passage, lastQuery);
+
+    if (enhancementQueries.length === 0) {
+      setEnhancementMessage('자동 보강 검색에 사용할 특징 문구를 추출하지 못했습니다.');
+      setEnhancementAttempts([]);
+      return;
+    }
+
+    setIsEnhancing(true);
+    setEnhancementMessage('');
+    setEnhancementAttempts([]);
+
+    let foundResults: GoogleBookResult[] = [];
+    let matchedQuery = '';
+    const triedQueries: string[] = [];
+
+    for (const query of enhancementQueries.slice(0, MAX_ENHANCEMENT_RETRIES)) {
+      triedQueries.push(query);
+      setEnhancementAttempts([...triedQueries]);
+
+      try {
+        const results = await fetchGoogleBooks(query);
+        if (results.length > 0) {
+          foundResults = results;
+          matchedQuery = query;
+          break;
+        }
+      } catch (error) {
+        console.error(error);
+      }
+    }
+
+    if (foundResults.length > 0 && matchedQuery) {
+      setGoogleResults(foundResults);
+      setGoogleQueryUsed(matchedQuery);
+      setEnhancementMessage(`WorksheetMaker 1번 지문을 바탕으로 자동 보강 검색을 수행해 Google Books 후보를 찾았습니다.`);
+    } else {
+      setEnhancementMessage(`자동 보강 검색 ${Math.min(enhancementQueries.length, MAX_ENHANCEMENT_RETRIES)}회 내에서는 Google Books 후보를 찾지 못했습니다.`);
+    }
+
+    setIsEnhancing(false);
+  }, [googleError, googleResults.length, isEnhancing, isSearching, lastQuery, worksheetResults]);
+
   const handleCopy = useCallback(() => {
     if (!normalizedPassage) return;
     navigator.clipboard.writeText(normalizedPassage);
@@ -204,8 +373,16 @@ export default function App() {
   }, [normalizedPassage]);
 
   const displayedWorksheetResults = useMemo(() => worksheetResults?.results.slice(0, 2) ?? [], [worksheetResults]);
-
   const hasAnyResultsView = lastQuery || isSearching;
+  const currentGoogleQuery = googleQueryUsed || lastQuery || normalizedPassage;
+  const canShowEnhancementButton =
+    !isSearching &&
+    !isEnhancing &&
+    !googleError &&
+    !!lastQuery &&
+    googleResults.length === 0 &&
+    worksheetResults?.resultCount === 1 &&
+    !!worksheetResults.results[0]?.passage;
 
   return (
     <div className="min-h-screen bg-[#f8f9fa] text-slate-900 font-sans selection:bg-indigo-100">
@@ -283,7 +460,7 @@ export default function App() {
               <div className="flex flex-col gap-3 lg:flex-row">
                 <button
                   onClick={handleUnifiedSearch}
-                  disabled={!normalizedPassage || isSearching}
+                  disabled={!normalizedPassage || isSearching || isEnhancing}
                   className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-indigo-600 px-5 py-4 font-semibold text-white shadow-lg shadow-indigo-200 transition-all active:scale-[0.99] disabled:cursor-not-allowed disabled:bg-slate-300"
                 >
                   {isSearching ? <LoaderCircle size={20} className="animate-spin" /> : <Search size={20} />}
@@ -340,7 +517,7 @@ export default function App() {
                 <div className="space-y-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
                   <div className="flex items-center justify-between gap-3">
                     <a
-                      href={lastQuery || normalizedPassage ? `${GOOGLE_BOOKS_PAGE_URL}${encodeURIComponent(`"${lastQuery || normalizedPassage}"`)}` : 'https://books.google.com/'}
+                      href={currentGoogleQuery ? `${GOOGLE_BOOKS_PAGE_URL}${encodeURIComponent(`"${currentGoogleQuery}"`)}` : 'https://books.google.com/'}
                       target="_blank"
                       rel="noreferrer"
                       className="group flex items-center gap-2"
@@ -369,9 +546,57 @@ export default function App() {
                     <p className="text-xs text-slate-400">Google Books 데이터 제공</p>
                   )}
 
+                  {enhancementMessage && !googleError && (
+                    <div className="rounded-2xl border border-indigo-200 bg-indigo-50 p-4 text-sm text-indigo-700">
+                      <div className="flex items-start gap-2">
+                        <Sparkles size={16} className="mt-0.5 shrink-0" />
+                        <div className="space-y-2">
+                          <p>{enhancementMessage}</p>
+                          {enhancementAttempts.length > 0 && (
+                            <div>
+                              <p className="text-xs font-semibold uppercase tracking-wider text-indigo-500">시도한 검색 문구</p>
+                              <ul className="mt-1 space-y-1 text-xs text-indigo-600">
+                                {enhancementAttempts.map((attempt) => (
+                                  <li key={attempt}>• {attempt}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
                   {!googleError && !isSearching && googleResults.length === 0 && lastQuery && (
-                    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5 text-sm text-slate-500">
-                      표시할 Google Books 후보가 없습니다. 새 탭 버튼으로 원래 검색 페이지를 바로 열어 확인해보세요.
+                    <div className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-5 text-sm text-slate-500">
+                      <p>표시할 Google Books 후보가 없습니다. 새 탭 버튼으로 원래 검색 페이지를 바로 열어 확인해보세요.</p>
+
+                      {canShowEnhancementButton && (
+                        <div className="rounded-2xl border border-indigo-200 bg-white p-4">
+                          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                            <div>
+                              <p className="font-semibold text-slate-700">자동 보강 검색</p>
+                              <p className="mt-1 text-xs leading-5 text-slate-500">
+                                WorksheetMaker 1번 지문에서 특징적인 구간을 추출해 Google Books를 최대 {MAX_ENHANCEMENT_RETRIES}회 추가 검색합니다.
+                              </p>
+                            </div>
+                            <button
+                              onClick={handleAutoEnhance}
+                              disabled={isEnhancing}
+                              className="inline-flex items-center justify-center gap-2 rounded-full bg-indigo-600 px-4 py-2 text-xs font-semibold text-white transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+                            >
+                              {isEnhancing ? <LoaderCircle size={14} className="animate-spin" /> : <Sparkles size={14} />}
+                              {isEnhancing ? '보강 검색 중...' : '자동 보강 검색'}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {googleResults.length > 0 && currentGoogleQuery && currentGoogleQuery !== lastQuery && (
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-500">
+                      현재 Google Books 결과는 자동 보강 검색 문구로 찾았습니다: <span className="font-medium text-slate-700">{currentGoogleQuery}</span>
                     </div>
                   )}
 
@@ -393,14 +618,14 @@ export default function App() {
                           </div>
                           <div className="min-w-0 flex-1 space-y-2">
                             <div>
-                              <h4 className="line-clamp-2 text-base font-semibold text-slate-800">{highlightText(result.title, lastQuery || normalizedPassage)}</h4>
+                              <h4 className="line-clamp-2 text-base font-semibold text-slate-800">{highlightText(result.title, currentGoogleQuery)}</h4>
                               <p className="mt-1 text-sm text-slate-500">
                                 {result.authors.length > 0 ? result.authors.join(', ') : '저자 정보 없음'}
                                 {result.publishedDate ? ` · ${result.publishedDate}` : ''}
                               </p>
                             </div>
                             {result.snippet && (
-                              <p className="line-clamp-3 text-sm leading-relaxed text-slate-600">{highlightText(result.snippet, lastQuery || normalizedPassage)}</p>
+                              <p className="line-clamp-3 text-sm leading-relaxed text-slate-600">{highlightText(result.snippet, currentGoogleQuery)}</p>
                             )}
                             <div className="flex flex-wrap gap-2 pt-1">
                               {result.previewLink && (
