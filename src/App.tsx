@@ -46,6 +46,11 @@ type WorksheetSearchResponse = {
   results: WorksheetResult[];
 };
 
+type HighlightPattern = {
+  text: string;
+  className: string;
+};
+
 const GOOGLE_BOOKS_PAGE_URL = 'https://www.google.com/search?tbm=bks&q=';
 const WORKSHEETMAKER_POST_URL = 'https://www.worksheetmaker.co.kr/user20/dataTexts/list.do';
 const WORKSHEETMAKER_HOME_URL = 'https://www.worksheetmaker.co.kr/';
@@ -109,6 +114,51 @@ function highlightText(text: string, query: string) {
       <React.Fragment key={`${part}-${index}`}>{part}</React.Fragment>
     ),
   );
+}
+
+function highlightTextWithPatterns(text: string, patterns: HighlightPattern[]) {
+  const cleanText = text ?? '';
+  const normalizedPatterns = Array.from(
+    new Map(
+      patterns
+        .map((pattern) => ({ ...pattern, text: sanitizeSearchQuery(pattern.text) }))
+        .filter((pattern) => pattern.text)
+        .sort((a, b) => b.text.length - a.text.length)
+        .map((pattern) => [pattern.text.toLowerCase(), pattern]),
+    ).values(),
+  );
+
+  if (!cleanText || normalizedPatterns.length === 0) {
+    return cleanText;
+  }
+
+  const regex = new RegExp(
+    `(${normalizedPatterns
+      .map((pattern) => escapeRegex(pattern.text).replace(/ /g, '\\s+'))
+      .join('|')})`,
+    'ig',
+  );
+
+  const parts = cleanText.split(regex);
+
+  if (parts.length === 1) {
+    return cleanText;
+  }
+
+  return parts.map((part, index) => {
+    const normalizedPart = sanitizeSearchQuery(part).toLowerCase();
+    const matchedPattern = normalizedPatterns.find((pattern) => pattern.text.toLowerCase() === normalizedPart);
+
+    if (matchedPattern) {
+      return (
+        <mark key={`${part}-${index}`} className={`rounded px-0.5 text-inherit ${matchedPattern.className}`}>
+          {part}
+        </mark>
+      );
+    }
+
+    return <React.Fragment key={`${part}-${index}`}>{part}</React.Fragment>;
+  });
 }
 
 function extractEnhancementQueries(passage: string, originalQuery: string) {
@@ -283,7 +333,6 @@ export default function App() {
   const normalizedPassage = useMemo(() => sanitizeSearchQuery(passage), [passage]);
   const worksheetWordCount = useMemo(() => countWords(passage), [passage]);
 
-
   useEffect(() => {
     if (hasInitializedFromUrlRef.current) return;
     hasInitializedFromUrlRef.current = true;
@@ -335,8 +384,6 @@ export default function App() {
     await Promise.allSettled([googleTask, worksheetTask]);
     setIsSearching(false);
   }, [normalizedPassage, worksheetWordCount]);
-
-
 
   useEffect(() => {
     const pendingQuery = initialUrlQueryRef.current;
@@ -396,7 +443,7 @@ export default function App() {
     if (foundResults.length > 0 && matchedQuery) {
       setGoogleResults(foundResults);
       setGoogleQueryUsed(matchedQuery);
-      setEnhancementMessage(`WorksheetMaker 1번 지문을 바탕으로 자동 보강 검색을 수행해 Google Books 후보를 찾았습니다.`);
+      setEnhancementMessage('WorksheetMaker 1번 지문을 바탕으로 자동 보강 검색을 수행해 Google Books 후보를 찾았습니다.');
     } else {
       setEnhancementMessage(`자동 보강 검색 ${Math.min(enhancementQueries.length, MAX_ENHANCEMENT_RETRIES)}회 내에서는 Google Books 후보를 찾지 못했습니다.`);
     }
@@ -423,6 +470,20 @@ export default function App() {
   const displayedWorksheetResults = useMemo(() => worksheetResults?.results.slice(0, 1) ?? [], [worksheetResults]);
   const hasAnyResultsView = lastQuery || isSearching;
   const currentGoogleQuery = googleQueryUsed || lastQuery || normalizedPassage;
+  const enhancementMatchedQuery = currentGoogleQuery && lastQuery && currentGoogleQuery !== lastQuery ? currentGoogleQuery : '';
+  const worksheetHighlightPatterns = useMemo(() => {
+    const patterns: HighlightPattern[] = [];
+
+    if (lastQuery) {
+      patterns.push({ text: lastQuery, className: 'bg-amber-200/80' });
+    }
+
+    if (enhancementMatchedQuery) {
+      patterns.push({ text: enhancementMatchedQuery, className: 'bg-sky-200/85 text-sky-950' });
+    }
+
+    return patterns;
+  }, [enhancementMatchedQuery, lastQuery]);
   const canShowEnhancementButton =
     !isSearching &&
     !isEnhancing &&
@@ -461,12 +522,7 @@ export default function App() {
             <div className="flex flex-wrap items-baseline justify-center gap-x-1.5 gap-y-1">
               <h2 className="text-3xl font-bold text-slate-800">지문 원문 찾기</h2>
               <span className="inline-flex items-center rounded-md px-1.5 py-0.5 text-sm font-medium text-sky-700/80">by</span>
-              <a
-                href={FLOW_BLOG_URL}
-                target="_blank"
-                rel="noreferrer"
-                className={BRAND_LINK_CLASS}
-              >
+              <a href={FLOW_BLOG_URL} target="_blank" rel="noreferrer" className={BRAND_LINK_CLASS}>
                 Flow 영어연구소
               </a>
             </div>
@@ -591,9 +647,7 @@ export default function App() {
                     </div>
                   )}
 
-                  {!googleError && (
-                    <p className="text-xs text-slate-400">Google Books 데이터 제공</p>
-                  )}
+                  {!googleError && <p className="text-xs text-slate-400">Google Books 데이터 제공</p>}
 
                   {enhancementMessage && !googleError && (
                     <div className="rounded-2xl border border-indigo-200 bg-indigo-50 p-4 text-sm text-indigo-700">
@@ -644,8 +698,9 @@ export default function App() {
                   )}
 
                   {googleResults.length > 0 && currentGoogleQuery && currentGoogleQuery !== lastQuery && (
-                    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-500">
-                      현재 Google Books 결과는 자동 보강 검색 문구로 찾았습니다: <span className="font-medium text-slate-700">{currentGoogleQuery}</span>
+                    <div className="rounded-2xl border border-sky-200 bg-sky-50 p-4 text-xs text-slate-600">
+                      현재 Google Books 결과는 자동 보강 검색 문구로 찾았습니다:{' '}
+                      <span className="font-semibold text-sky-700">{currentGoogleQuery}</span>
                     </div>
                   )}
 
@@ -760,7 +815,7 @@ export default function App() {
                     </div>
                   )}
 
-                  {worksheetResults?.results && worksheetResults.results.length > 2 && (
+                  {worksheetResults?.results && worksheetResults.results.length > 1 && (
                     <div className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
                       <span>처음 1개 결과만 표시합니다. 전체 결과는 WorksheetMaker 새 창에서 확인하세요.</span>
                       <button
@@ -784,7 +839,9 @@ export default function App() {
                         <div className="space-y-3">
                           <div>
                             <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-slate-400">영어 지문</p>
-                            <p className="whitespace-pre-line text-sm leading-6 text-slate-700">{highlightText(result.passage, lastQuery || normalizedPassage)}</p>
+                            <p className="whitespace-pre-line text-sm leading-6 text-slate-700">
+                              {highlightTextWithPatterns(result.passage, worksheetHighlightPatterns)}
+                            </p>
                           </div>
 
                           {result.sourceLines.length > 0 && (
@@ -793,7 +850,7 @@ export default function App() {
                               <ul className="space-y-1 text-sm text-slate-600">
                                 {result.sourceLines.map((line) => (
                                   <li key={line} className="rounded-xl bg-slate-50 px-3 py-2">
-                                    {highlightText(line, lastQuery || normalizedPassage)}
+                                    {highlightTextWithPatterns(line, worksheetHighlightPatterns)}
                                   </li>
                                 ))}
                               </ul>
@@ -848,7 +905,13 @@ export default function App() {
       </main>
 
       <footer className="mx-auto mt-12 max-w-6xl border-t border-slate-200 px-6 py-12 text-center text-sm text-slate-400">
-        <p>© 2026 <a href={FLOW_BLOG_URL} target="_blank" rel="noreferrer" className={BRAND_LINK_CLASS}>Flow 영어연구소</a>. All rights reserved.</p>
+        <p>
+          © 2026{' '}
+          <a href={FLOW_BLOG_URL} target="_blank" rel="noreferrer" className={BRAND_LINK_CLASS}>
+            Flow 영어연구소
+          </a>
+          . All rights reserved.
+        </p>
       </footer>
     </div>
   );
