@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle,
   BookOpen,
@@ -72,6 +72,13 @@ const sanitizeSearchQuery = (value: string) => {
 const countWords = (value: string) => sanitizeSearchQuery(value).split(' ').filter(Boolean).length;
 const stripHtml = (value?: string) => (value ?? '').replace(/<[^>]+>/g, '').trim();
 const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const getQueryFromUrl = () => {
+  if (typeof window === 'undefined') return '';
+
+  const params = new URLSearchParams(window.location.search);
+  return sanitizeSearchQuery(params.get('q') ?? '');
+};
 
 function highlightText(text: string, query: string) {
   const cleanText = text ?? '';
@@ -243,6 +250,8 @@ function openWorksheetMakerSearch(query: string) {
 }
 
 export default function App() {
+  const initialUrlQueryRef = useRef('');
+  const hasInitializedFromUrlRef = useRef(false);
   const [passage, setPassage] = useState('');
   const [copied, setCopied] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
@@ -259,6 +268,18 @@ export default function App() {
 
   const normalizedPassage = useMemo(() => sanitizeSearchQuery(passage), [passage]);
   const worksheetWordCount = useMemo(() => countWords(passage), [passage]);
+
+
+  useEffect(() => {
+    if (hasInitializedFromUrlRef.current) return;
+    hasInitializedFromUrlRef.current = true;
+
+    const urlQuery = getQueryFromUrl();
+    if (!urlQuery) return;
+
+    initialUrlQueryRef.current = urlQuery;
+    setPassage(urlQuery);
+  }, []);
 
   const handleUnifiedSearch = useCallback(async () => {
     if (!normalizedPassage) return;
@@ -300,6 +321,19 @@ export default function App() {
     await Promise.allSettled([googleTask, worksheetTask]);
     setIsSearching(false);
   }, [normalizedPassage, worksheetWordCount]);
+
+
+
+  useEffect(() => {
+    const pendingQuery = initialUrlQueryRef.current;
+
+    if (!pendingQuery || normalizedPassage !== pendingQuery || isSearching || isEnhancing) {
+      return;
+    }
+
+    initialUrlQueryRef.current = '';
+    void handleUnifiedSearch();
+  }, [handleUnifiedSearch, isEnhancing, isSearching, normalizedPassage]);
 
   const handleAutoEnhance = useCallback(async () => {
     if (
