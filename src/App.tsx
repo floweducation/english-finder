@@ -394,16 +394,8 @@ function formatAuthors(authors?: string[]) {
 
 function formatCopyAsParagraphs(value?: string) {
   return decodeHtmlEntities(value ?? '')
-    .replace(/
-/g, '
-')
-    .replace(/[ 	]+
-/g, '
-')
-    .replace(/
-{3,}/g, '
-
-')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
     .replace(/ /g, ' ')
     .trim();
 }
