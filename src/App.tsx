@@ -452,8 +452,9 @@ function buildLlmInputPackage({
     '4. 대응되는 문장은 같은 번호로 맞춰라.',
     '5. 문제 지문에만 있는 문장, 원문 지문에만 있는 문장도 각각 독립 행으로 유지하라.',
     '6. 어휘 변형, 삭제, 추가, 문장 분할/통합, 표현 완화/강화가 있으면 그 차이가 드러나게 정리하라.',
-    '7. 변형된 핵심 부분만 굵게 표시하라.',
+    '7. 변형된 핵심 부분을 굵게 표시하고 밝은 색상으로 양쪽 모두 하이라이트하라.',
     '8. 출력은 반드시 표 형식으로 하라.',
+    '9. 표 아래에 원문 책 정보를 표시하라.',
     '',
     '[출력 형식]',
     '번호 | 문제 지문 | 원문 지문',
@@ -470,7 +471,6 @@ function buildLlmInputPackage({
     '- 이미지 판독이 불명확한 부분은 추측하지 말고 자연스럽게 보이는 범위까지만 반영하라.',
     '- 문제 지문과 원문 지문의 문장 수가 다르면 빈칸 없이 가장 자연스럽게 대응시켜라.',
     '- 동일 의미지만 표현만 달라진 경우도 그대로 대응시켜라.',
-    '- 결과 표 아래에 별도 해설은 붙이지 마라.',
   ].join('\n');
 }
 
@@ -779,12 +779,14 @@ export default function App() {
           className="space-y-8"
         >
           <section className="space-y-4 text-center">
-            <div className="flex flex-wrap items-baseline justify-center gap-x-1.5 gap-y-1">
+            <div className="flex flex-wrap items-baseline justify-center gap-x-2 gap-y-1">
               <h2 className="text-3xl font-bold text-slate-800">지문 원문 찾기</h2>
-              <span className="inline-flex items-center rounded-md px-1.5 py-0.5 text-sm font-medium text-sky-700/80">by</span>
-              <a href={FLOW_BLOG_URL} target="_blank" rel="noreferrer" className={BRAND_LINK_CLASS}>
-                Flow 영어연구소
-              </a>
+              <div className="inline-flex items-baseline gap-1">
+                <span className="text-sm font-medium text-slate-500">by</span>
+                <a href={FLOW_BLOG_URL} target="_blank" rel="noreferrer" className={BRAND_LINK_CLASS}>
+                  Flow 영어연구소
+                </a>
+              </div>
             </div>
             <p className="mx-auto max-w-2xl text-slate-600">
               찾고 싶은 영어 지문의 특정 문구를 입력해 주세요. Google Books 및 WorksheetMaker 검색 결과를 한 번에 확인할 수 있습니다.
