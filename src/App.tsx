@@ -890,7 +890,7 @@ export default function App() {
                         Google Books에서 필요한 페이지를 캡처한 뒤, 아래 버튼으로 복사한 텍스트를 ChatGPT 또는 Gemini에 붙여넣으면 문장 단위 대조표를 빠르게 만들 수 있습니다.
                       </p>
                       <p className="text-xs text-slate-500">
-                        Alfred 개인용 호출 주소: <span className="font-mono text-slate-700">https://english-finder.vercel.app/?q={{query}}&mode=flow-llm</span>
+                        Alfred 개인용 호출 주소: <span className="font-mono text-slate-700">{"https://english-finder.vercel.app/?q={query}&mode=flow-llm"}</span>
                       </p>
                     </div>
 
