@@ -59,6 +59,7 @@ const APP_HOME_URL = 'https://english-finder.vercel.app/';
 const BRAND_LINK_CLASS = 'inline-flex items-center rounded-md px-1.5 py-0.5 text-sm font-medium text-sky-700 transition-colors hover:bg-sky-50 hover:text-sky-800';
 const MIN_WORKSHEET_WORDS = 3;
 const MAX_ENHANCEMENT_RETRIES = 4;
+const FLOW_LLM_MODE = 'flow-llm';
 
 const STOP_WORDS = new Set([
   'a', 'about', 'above', 'after', 'again', 'against', 'all', 'almost', 'along', 'already', 'also', 'am', 'an',
@@ -126,6 +127,13 @@ const getQueryFromUrl = () => {
 
   const params = new URLSearchParams(window.location.search);
   return sanitizeSearchQuery(params.get('q') ?? '');
+};
+
+const getModeFromUrl = () => {
+  if (typeof window === 'undefined') return '';
+
+  const params = new URLSearchParams(window.location.search);
+  return sanitizeSearchQuery(params.get('mode') ?? '');
 };
 
 function highlightText(text: string, query: string) {
@@ -379,6 +387,93 @@ function extractEnhancementQueries(passage: string, originalQuery: string) {
   return selected.slice(0, MAX_ENHANCEMENT_RETRIES).map((candidate) => candidate.text);
 }
 
+
+function formatAuthors(authors?: string[]) {
+  return authors?.filter(Boolean).join(', ') || '저자 정보 없음';
+}
+
+function buildComparisonPromptTemplate() {
+  return [
+    '다음 작업을 수행해줘.',
+    '',
+    '[작업 목표]',
+    '첨부한 Google Books 이미지 속 원문 지문과 아래 문제 지문을 문장 단위로 정밀 대조해줘.',
+    '',
+    '[중요 지시]',
+    '1. 첨부한 이미지를 직접 읽어 원문 지문을 파악하라.',
+    '2. 이미지에 실제로 보이는 범위 안에서만 원문 지문을 재구성하라.',
+    '3. 아래 문제 지문과 원문 지문을 의미상 가장 자연스럽게 대응시켜라.',
+    '4. 대응되는 문장은 같은 번호로 맞춰라.',
+    '5. 문제 지문에만 있는 문장, 원문 지문에만 있는 문장도 각각 독립 행으로 유지하라.',
+    '6. 어휘 변형, 삭제, 추가, 문장 분할/통합, 표현 완화/강화가 있으면 그 차이가 드러나게 정리하라.',
+    '7. 변형된 핵심 부분만 굵게 표시하라.',
+    '8. 출력은 반드시 표 형식으로 하라.',
+    '9. 표 아래에 별도 해설은 붙이지 마라.',
+    '',
+    '[출력 형식]',
+    '번호 | 문제 지문 | 원문 지문',
+    '',
+    '[문제 지문]',
+    '{{WORKSHEETMAKER_PASSAGE}}',
+    '',
+    '[참고 정보]',
+    '- Google Books 제목: {{GOOGLE_BOOKS_TITLE}}',
+    '- 저자: {{GOOGLE_BOOKS_AUTHORS}}',
+    '- 검색 문구: {{SEARCH_QUERY}}',
+    '',
+    '[추가 규칙]',
+    '- 이미지 판독이 불명확한 부분은 추측하지 말고 자연스럽게 보이는 범위까지만 반영하라.',
+    '- 문제 지문과 원문 지문의 문장 수가 다르면 빈칸 없이 가장 자연스럽게 대응시켜라.',
+    '- 동일 의미지만 표현만 달라진 경우도 그대로 대응시켜라.',
+  ].join('\n');
+}
+
+function buildLlmInputPackage({
+  passage,
+  title,
+  authors,
+  query,
+}: {
+  passage: string;
+  title?: string;
+  authors?: string[];
+  query: string;
+}) {
+  return [
+    '다음 작업을 수행해줘.',
+    '',
+    '[작업 목표]',
+    '첨부한 Google Books 이미지 속 원문 지문과 아래 문제 지문을 문장 단위로 정밀 대조해줘.',
+    '',
+    '[중요 지시]',
+    '1. 첨부한 이미지를 직접 읽어 원문 지문을 파악하라.',
+    '2. 이미지에 실제로 보이는 범위 안에서만 원문 지문을 재구성하라.',
+    '3. 아래 문제 지문과 원문 지문을 의미상 가장 자연스럽게 대응시켜라.',
+    '4. 대응되는 문장은 같은 번호로 맞춰라.',
+    '5. 문제 지문에만 있는 문장, 원문 지문에만 있는 문장도 각각 독립 행으로 유지하라.',
+    '6. 어휘 변형, 삭제, 추가, 문장 분할/통합, 표현 완화/강화가 있으면 그 차이가 드러나게 정리하라.',
+    '7. 변형된 핵심 부분만 굵게 표시하라.',
+    '8. 출력은 반드시 표 형식으로 하라.',
+    '',
+    '[출력 형식]',
+    '번호 | 문제 지문 | 원문 지문',
+    '',
+    '[문제 지문]',
+    passage.trim(),
+    '',
+    '[참고 정보]',
+    `- Google Books 제목: ${title || '제목 정보 없음'}`,
+    `- 저자: ${formatAuthors(authors)}`,
+    `- 검색 문구: ${query || '검색 문구 없음'}`,
+    '',
+    '[추가 규칙]',
+    '- 이미지 판독이 불명확한 부분은 추측하지 말고 자연스럽게 보이는 범위까지만 반영하라.',
+    '- 문제 지문과 원문 지문의 문장 수가 다르면 빈칸 없이 가장 자연스럽게 대응시켜라.',
+    '- 동일 의미지만 표현만 달라진 경우도 그대로 대응시켜라.',
+    '- 결과 표 아래에 별도 해설은 붙이지 마라.',
+  ].join('\n');
+}
+
 async function fetchGoogleBooks(query: string): Promise<GoogleBookResult[]> {
   const response = await fetch(`/api/google-books-search?q=${encodeURIComponent(query)}`);
 
@@ -458,8 +553,10 @@ export default function App() {
   const [worksheetNotice, setWorksheetNotice] = useState('');
   const [enhancementMessage, setEnhancementMessage] = useState('');
   const [enhancementAttempts, setEnhancementAttempts] = useState<string[]>([]);
+  const [copiedFlowAction, setCopiedFlowAction] = useState('');
 
   const normalizedPassage = useMemo(() => sanitizeSearchQuery(passage), [passage]);
+  const isFlowLlmMode = useMemo(() => getModeFromUrl() === FLOW_LLM_MODE, []);
   const worksheetWordCount = useMemo(() => countWords(passage), [passage]);
 
   useEffect(() => {
@@ -587,6 +684,38 @@ export default function App() {
     setTimeout(() => setCopied(false), 2000);
   }, [normalizedPassage]);
 
+  const copyFlowText = useCallback((textToCopy: string, action: string) => {
+    if (!textToCopy) return;
+    navigator.clipboard.writeText(textToCopy);
+    setCopiedFlowAction(action);
+    window.setTimeout(() => setCopiedFlowAction(''), 2000);
+  }, []);
+
+  const firstWorksheetResult = worksheetResults?.results[0] ?? null;
+  const firstGoogleResult = googleResults[0] ?? null;
+
+  const handleCopyWorksheetPassage = useCallback(() => {
+    if (!firstWorksheetResult?.passage) return;
+    copyFlowText(firstWorksheetResult.passage, 'passage');
+  }, [copyFlowText, firstWorksheetResult]);
+
+  const handleCopyComparisonPrompt = useCallback(() => {
+    copyFlowText(buildComparisonPromptTemplate(), 'prompt');
+  }, [copyFlowText]);
+
+  const handleCopyLlmPackage = useCallback(() => {
+    if (!firstWorksheetResult?.passage) return;
+    copyFlowText(
+      buildLlmInputPackage({
+        passage: firstWorksheetResult.passage,
+        title: firstGoogleResult?.title,
+        authors: firstGoogleResult?.authors,
+        query: googleQueryUsed || lastQuery || normalizedPassage,
+      }),
+      'package',
+    );
+  }, [copyFlowText, firstGoogleResult, firstWorksheetResult, googleQueryUsed, lastQuery, normalizedPassage]);
+
   const openGoogleBooksPage = useCallback(() => {
     if (!normalizedPassage) return;
     window.open(buildGoogleBooksSearchUrl(normalizedPassage), '_blank');
@@ -599,6 +728,7 @@ export default function App() {
   const displayedWorksheetResults = useMemo(() => worksheetResults?.results.slice(0, 1) ?? [], [worksheetResults]);
   const hasAnyResultsView = lastQuery || isSearching;
   const currentGoogleQuery = googleQueryUsed || lastQuery || normalizedPassage;
+  const flowLlmHelperVisible = isFlowLlmMode && !!firstWorksheetResult?.passage;
   const enhancementMatchedQuery = currentGoogleQuery && lastQuery && currentGoogleQuery !== lastQuery ? currentGoogleQuery : '';
   const worksheetHighlightPatterns = useMemo(() => {
     const patterns: HighlightPattern[] = [];
@@ -747,6 +877,49 @@ export default function App() {
                 </div>
                 <p className="text-sm text-slate-500">왼쪽은 Google Books, 오른쪽은 WorksheetMaker 검색 결과입니다.</p>
               </div>
+
+              {flowLlmHelperVisible && (
+                <section className="rounded-3xl border border-sky-200 bg-sky-50/70 p-5 shadow-sm">
+                  <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                    <div className="space-y-2">
+                      <p className="inline-flex items-center rounded-full bg-white px-3 py-1 text-xs font-semibold text-sky-700 ring-1 ring-sky-200">
+                        Flow LLM 비교 도구
+                      </p>
+                      <h3 className="text-lg font-semibold text-slate-800">Google Books 이미지 + WorksheetMaker 1번 지문 비교용 입력 패키지</h3>
+                      <p className="max-w-3xl text-sm leading-6 text-slate-600">
+                        Google Books에서 필요한 페이지를 캡처한 뒤, 아래 버튼으로 복사한 텍스트를 ChatGPT 또는 Gemini에 붙여넣으면 문장 단위 대조표를 빠르게 만들 수 있습니다.
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        Alfred 개인용 호출 주소: <span className="font-mono text-slate-700">https://english-finder.vercel.app/?q={{query}}&mode=flow-llm</span>
+                      </p>
+                    </div>
+
+                    <div className="grid w-full gap-3 md:grid-cols-3 lg:w-auto lg:min-w-[720px]">
+                      <button
+                        onClick={handleCopyWorksheetPassage}
+                        className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50"
+                      >
+                        <Copy size={16} />
+                        {copiedFlowAction === 'passage' ? '1번 지문 복사됨' : '1번 지문 전체 복사'}
+                      </button>
+                      <button
+                        onClick={handleCopyComparisonPrompt}
+                        className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50"
+                      >
+                        <Copy size={16} />
+                        {copiedFlowAction === 'prompt' ? '프롬프트 복사됨' : '비교 프롬프트 복사'}
+                      </button>
+                      <button
+                        onClick={handleCopyLlmPackage}
+                        className="inline-flex items-center justify-center gap-2 rounded-2xl bg-sky-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-sky-700"
+                      >
+                        <Copy size={16} />
+                        {copiedFlowAction === 'package' ? '입력 패키지 복사됨' : 'LLM 입력 패키지 복사'}
+                      </button>
+                    </div>
+                  </div>
+                </section>
+              )}
 
               <div className="grid gap-6 xl:grid-cols-2">
                 <div className="space-y-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
