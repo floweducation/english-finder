@@ -17,6 +17,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { motion } from 'motion/react';
+import { Analytics } from '@vercel/analytics/react';
 
 type GoogleBookResult = {
   id: string;
@@ -1309,6 +1310,7 @@ export default function App() {
           . All rights reserved.
         </p>
       </footer>
+      <Analytics />
     </div>
   );
 }
