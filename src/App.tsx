@@ -52,6 +52,15 @@ type HighlightPattern = {
   className: string;
 };
 
+type VisitorStats = {
+  enabled: boolean;
+  total: number;
+  today: number;
+  yesterday: number;
+  timezone: string;
+  updatedAt: string;
+};
+
 const GOOGLE_BOOKS_PAGE_URL = 'https://www.google.com/search?tbm=bks&q=';
 const WORKSHEETMAKER_POST_URL = 'https://www.worksheetmaker.co.kr/user20/dataTexts/list.do';
 const WORKSHEETMAKER_HOME_URL = 'https://www.worksheetmaker.co.kr/';
@@ -61,6 +70,8 @@ const BRAND_LINK_CLASS = 'inline-flex items-center rounded-md px-1.5 py-0.5 text
 const MIN_WORKSHEET_WORDS = 3;
 const MAX_ENHANCEMENT_RETRIES = 4;
 const FLOW_LLM_MODE = 'flow-llm';
+const VISITOR_COUNTER_TIME_ZONE = 'Asia/Seoul';
+const VISITOR_COUNTER_STORAGE_PREFIX = 'english-finder:visitor-counted';
 
 const STOP_WORDS = new Set([
   'a', 'about', 'above', 'after', 'again', 'against', 'all', 'almost', 'along', 'already', 'also', 'am', 'an',
@@ -626,6 +637,40 @@ function openWorksheetMakerSearch(query: string) {
   document.body.removeChild(form);
 }
 
+function getVisitorCounterDateKey() {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: VISITOR_COUNTER_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date());
+}
+
+function getVisitorCounterStorageKey() {
+  return `${VISITOR_COUNTER_STORAGE_PREFIX}:${getVisitorCounterDateKey()}`;
+}
+
+function formatVisitorStatsTimestamp(value: string, timezone: string) {
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return '';
+  }
+
+  return new Intl.DateTimeFormat('ko-KR', {
+    timeZone: timezone || VISITOR_COUNTER_TIME_ZONE,
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  })
+    .format(date)
+    .replace(/\.\s?/g, '-')
+    .replace(/-\s/, ' ')
+    .replace(/-$/, '');
+}
+
 export default function App() {
   const initialUrlQueryRef = useRef('');
   const hasInitializedFromUrlRef = useRef(false);
@@ -643,10 +688,12 @@ export default function App() {
   const [enhancementMessage, setEnhancementMessage] = useState('');
   const [enhancementAttempts, setEnhancementAttempts] = useState<string[]>([]);
   const [copiedFlowAction, setCopiedFlowAction] = useState('');
+  const [visitorStats, setVisitorStats] = useState<VisitorStats | null>(null);
 
   const normalizedPassage = useMemo(() => sanitizeSearchQuery(passage), [passage]);
   const isFlowLlmMode = useMemo(() => getModeFromUrl() === FLOW_LLM_MODE, []);
   const worksheetWordCount = useMemo(() => countWords(passage), [passage]);
+  const visitorStatsFormatter = useMemo(() => new Intl.NumberFormat('ko-KR'), []);
 
   useEffect(() => {
     if (hasInitializedFromUrlRef.current) return;
@@ -657,6 +704,56 @@ export default function App() {
 
     initialUrlQueryRef.current = urlQuery;
     setPassage(urlQuery);
+  }, []);
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    const loadVisitorStats = async () => {
+      let shouldCountVisit = true;
+      let storageKey = '';
+
+      try {
+        storageKey = getVisitorCounterStorageKey();
+        shouldCountVisit = window.localStorage.getItem(storageKey) !== '1';
+      } catch {
+        shouldCountVisit = true;
+      }
+
+      const response = await fetch('/api/visitor-count', {
+        method: shouldCountVisit ? 'POST' : 'GET',
+        headers: shouldCountVisit ? { 'Content-Type': 'application/json' } : undefined,
+        body: shouldCountVisit ? JSON.stringify({ countVisit: true }) : undefined,
+      });
+
+      if (!response.ok) {
+        return;
+      }
+
+      const data = (await response.json()) as VisitorStats;
+
+      if (isCancelled || !data.enabled) {
+        return;
+      }
+
+      setVisitorStats(data);
+
+      if (shouldCountVisit && storageKey) {
+        try {
+          window.localStorage.setItem(storageKey, '1');
+        } catch {
+          // Ignore storage failures; the counter will still work as a visit counter.
+        }
+      }
+    };
+
+    void loadVisitorStats().catch((error) => {
+      console.error('visitor stats error:', error);
+    });
+
+    return () => {
+      isCancelled = true;
+    };
   }, []);
 
   const handleUnifiedSearch = useCallback(async () => {
@@ -1302,6 +1399,21 @@ export default function App() {
       </main>
 
       <footer className="mx-auto mt-12 max-w-6xl border-t border-slate-200 px-6 py-12 text-center text-sm text-slate-400">
+        {visitorStats && (
+          <section className="mx-auto mb-10 w-full max-w-xs text-left text-slate-500">
+            <p className="text-lg font-medium text-slate-700">Total</p>
+            <p className="mt-2 text-4xl font-semibold tracking-normal text-slate-800">
+              {visitorStatsFormatter.format(visitorStats.total)}
+            </p>
+            <div className="mt-5 space-y-2 text-lg text-slate-400">
+              <p>Today : {visitorStatsFormatter.format(visitorStats.today)}</p>
+              <p>Yesterday : {visitorStatsFormatter.format(visitorStats.yesterday)}</p>
+            </div>
+            <p className="mt-8 text-right text-sm text-slate-400">
+              {formatVisitorStatsTimestamp(visitorStats.updatedAt, visitorStats.timezone)}
+            </p>
+          </section>
+        )}
         <p>
           © 2026{' '}
           <a href={FLOW_BLOG_URL} target="_blank" rel="noreferrer" className={BRAND_LINK_CLASS}>
