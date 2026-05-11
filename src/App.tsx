@@ -1094,6 +1094,10 @@ function rankGoogleResultsForSource(results: GoogleBookResult[], sourceText: str
   });
 }
 
+function getReliableGoogleResults(results: GoogleBookResult[], sourceText: string, query: string) {
+  return rankGoogleResultsForSource(results, sourceText, query).filter((result) => assessGoogleBookMatch(result, sourceText, query).level !== 'mismatch');
+}
+
 function getGoogleReviewStyles(level: GoogleBookMatchReview['level']) {
   if (level === 'match') {
     return {
@@ -1309,11 +1313,16 @@ function WorksheetMakerMiniResult({ result, query }: { result?: WorksheetResult;
     );
   }
 
+  const passageContext = extractPhraseContext(result.passage, query, 18);
+  const passagePreview = passageContext.found
+    ? passageContext.text
+    : `${result.passage.replace(/\s+/g, ' ').trim().slice(0, 260)}${result.passage.length > 260 ? '...' : ''}`;
+
   return (
     <div className="space-y-3">
       <div>
         <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-slate-400">영어 지문</p>
-        <p className="line-clamp-5 text-sm leading-6 text-slate-700">{highlightTextWithPatterns(result.passage, [{ text: query, className: 'bg-amber-200/80' }])}</p>
+        <p className="text-sm leading-6 text-slate-700">{highlightTextWithPatterns(passagePreview, [{ text: query, className: 'bg-sky-200/85 text-sky-950' }])}</p>
       </div>
       {result.sourceLines.length > 0 && (
         <div>
@@ -1341,7 +1350,7 @@ async function findBatchGoogleResult(attempts: string[], sourceText: string) {
 
   for (const query of attempts) {
     try {
-      const googleResults = rankGoogleResultsForSource(await fetchGoogleBooks(query), sourceText, query);
+      const googleResults = getReliableGoogleResults(await fetchGoogleBooks(query), sourceText, query);
       hadSuccessfulRequest = true;
       googleError = '';
 
@@ -1532,7 +1541,7 @@ function BatchFinderApp() {
 
           {results.length > 0 && (
             <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-              <div className="grid grid-cols-[110px_minmax(360px,1.2fr)_minmax(420px,1fr)_minmax(360px,1.1fr)] border-b border-slate-200 bg-slate-50 text-center text-xs font-semibold uppercase tracking-wider text-slate-500 max-xl:hidden">
+              <div className="grid grid-cols-[110px_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)] border-b border-slate-200 bg-slate-50 text-center text-xs font-semibold uppercase tracking-wider text-slate-500 max-xl:hidden">
                 <div className="px-3 py-3">지문번호</div>
                 <div className="border-l border-slate-200 px-4 py-3">본문텍스트 / 검색 문구</div>
                 <div className="border-l border-slate-200 px-4 py-3">Google Books</div>
@@ -1541,7 +1550,7 @@ function BatchFinderApp() {
 
               <div className="divide-y divide-slate-200">
                 {results.map((result) => (
-                  <article key={result.id} className="grid grid-cols-[110px_minmax(360px,1.2fr)_minmax(420px,1fr)_minmax(360px,1.1fr)] max-xl:block">
+                  <article key={result.id} className="grid grid-cols-[110px_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)] max-xl:block">
                     <div className="px-3 py-4 text-center max-xl:border-b max-xl:border-slate-100">
                       <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 xl:hidden">지문번호</p>
                       <p className="mt-1 break-words text-sm font-semibold leading-6 text-slate-800">{result.id}</p>
@@ -1561,12 +1570,12 @@ function BatchFinderApp() {
                           : result.text}
                       </div>
                       {result.query && (
-                        <div className="mt-3 space-y-1 rounded-xl bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">
-                          <p>
+                        <div className="mt-3 space-y-2 rounded-xl bg-slate-50 px-3 py-2 text-xs leading-5">
+                          <p className="rounded-lg bg-amber-50 px-2 py-1 text-amber-800">
                             Google Books:{' '}
                             <span className="font-semibold">{getBatchGoogleDisplayQuery(result)}</span>
                           </p>
-                          <p>
+                          <p className="rounded-lg bg-sky-50 px-2 py-1 text-sky-800">
                             WorksheetMaker:{' '}
                             <span className="font-semibold">{getBatchWorksheetDisplayQuery(result)}</span>
                           </p>
