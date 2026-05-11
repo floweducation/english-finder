@@ -45,10 +45,16 @@ async function requestGoogleBooks({ query, apiKey }) {
     };
   }
 
-  const broadResults = await requestGoogleBooksApi({
-    apiKey,
-    searchQuery: query,
-  });
+  let broadResults = [];
+
+  try {
+    broadResults = await requestGoogleBooksApi({
+      apiKey,
+      searchQuery: query,
+    });
+  } catch {
+    broadResults = [];
+  }
 
   return {
     searchMode: broadResults.length > 0 ? 'broad-fallback' : 'exact',
