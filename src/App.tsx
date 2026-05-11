@@ -1098,6 +1098,17 @@ function getReliableGoogleResults(results: GoogleBookResult[], sourceText: strin
   return rankGoogleResultsForSource(results, sourceText, query).filter((result) => assessGoogleBookMatch(result, sourceText, query).level !== 'mismatch');
 }
 
+function getPassageContextPreview(text: string, query: string, displayRadius = 18) {
+  const context = extractPhraseContext(text, query, displayRadius);
+
+  if (context.found) {
+    return context.text;
+  }
+
+  const cleanText = text.replace(/\s+/g, ' ').trim();
+  return `${cleanText.slice(0, 260)}${cleanText.length > 260 ? '...' : ''}`;
+}
+
 function getGoogleReviewStyles(level: GoogleBookMatchReview['level']) {
   if (level === 'match') {
     return {
@@ -1313,10 +1324,7 @@ function WorksheetMakerMiniResult({ result, query }: { result?: WorksheetResult;
     );
   }
 
-  const passageContext = extractPhraseContext(result.passage, query, 18);
-  const passagePreview = passageContext.found
-    ? passageContext.text
-    : `${result.passage.replace(/\s+/g, ' ').trim().slice(0, 260)}${result.passage.length > 260 ? '...' : ''}`;
+  const passagePreview = getPassageContextPreview(result.passage, query);
 
   return (
     <div className="space-y-3">
@@ -1740,7 +1748,7 @@ function SingleFinderApp() {
 
     const googleTask = fetchGoogleBooks(normalizedPassage)
       .then((results) => {
-        setGoogleResults(results);
+        setGoogleResults(getReliableGoogleResults(results, normalizedPassage, normalizedPassage));
         setGoogleQueryUsed(normalizedPassage);
       })
       .catch((error) => {
@@ -1809,7 +1817,7 @@ function SingleFinderApp() {
       setEnhancementAttempts([...triedQueries]);
 
       try {
-        const results = await fetchGoogleBooks(query);
+        const results = getReliableGoogleResults(await fetchGoogleBooks(query), worksheetResults.results[0].passage, query);
         if (results.length > 0) {
           foundResults = results;
           matchedQuery = query;
@@ -1888,21 +1896,24 @@ function SingleFinderApp() {
   const hasAnyResultsView = lastQuery || isSearching;
   const currentGoogleQuery = googleQueryUsed || lastQuery || normalizedPassage;
   const flowLlmHelperVisible = isFlowLlmMode && !!firstWorksheetResult?.passage;
-  const enhancementMatchedQuery = currentGoogleQuery && lastQuery && currentGoogleQuery !== lastQuery ? currentGoogleQuery : '';
   const worksheetHighlightPatterns = useMemo(() => {
     const patterns: HighlightPattern[] = [];
 
     if (lastQuery) {
-      patterns.push({ text: lastQuery, className: 'bg-amber-200/80' });
-    }
-
-    if (enhancementMatchedQuery) {
-      patterns.push({ text: enhancementMatchedQuery, className: 'bg-sky-200/85 text-sky-950' });
+      patterns.push({ text: lastQuery, className: 'bg-sky-200/85 text-sky-950' });
     }
 
     return patterns;
-  }, [enhancementMatchedQuery, lastQuery]);
-  const googleHighlightPatterns = worksheetHighlightPatterns;
+  }, [lastQuery]);
+  const googleHighlightPatterns = useMemo(() => {
+    const patterns: HighlightPattern[] = [];
+
+    if (currentGoogleQuery) {
+      patterns.push({ text: currentGoogleQuery, className: 'bg-amber-200/80' });
+    }
+
+    return patterns;
+  }, [currentGoogleQuery]);
   const canShowEnhancementButton =
     !isSearching &&
     !isEnhancing &&
@@ -1926,6 +1937,9 @@ function SingleFinderApp() {
                 Google Books + WorksheetMaker
               </p>
             </div>
+          </a>
+          <a href={`${APP_HOME_URL}?mode=${ALL_MODE}`} className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-600 transition-colors hover:bg-slate-50">
+            일괄 검색
           </a>
         </div>
       </header>
@@ -2302,7 +2316,7 @@ function SingleFinderApp() {
                           <div>
                             <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-slate-400">영어 지문</p>
                             <p className="whitespace-pre-line text-sm leading-6 text-slate-700">
-                              {highlightTextWithPatterns(result.passage, worksheetHighlightPatterns)}
+                              {highlightTextWithPatterns(getPassageContextPreview(result.passage, lastQuery), worksheetHighlightPatterns)}
                             </p>
                           </div>
 
