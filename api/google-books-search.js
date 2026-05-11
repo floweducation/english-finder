@@ -121,6 +121,7 @@ async function requestGoogleBooksApi({ searchQuery, apiKey }) {
     maxResults: '5',
     langRestrict: 'en',
     printType: 'books',
+    country: 'KR',
   });
 
   if (apiKey) {
