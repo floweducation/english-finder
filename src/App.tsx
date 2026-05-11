@@ -792,12 +792,12 @@ function uniqueSearchQueries(queries: string[]) {
   );
 }
 
-function getPureSearchWords(text: string) {
-  return (
-    normalizeQuotes(stripHtml(text))
-      .replace(/\b([A-Za-z]+)['’]s\b/g, '$1')
-      .match(/[A-Za-z0-9]+/g) ?? []
-  );
+function getPureSearchWordSegments(text: string) {
+  return normalizeQuotes(stripHtml(text))
+    .replace(/\b[A-Za-z0-9]+['’][A-Za-z0-9]+\b/g, ' | ')
+    .split(/[^A-Za-z0-9\s]+/)
+    .map((segment) => segment.match(/[A-Za-z0-9]+/g) ?? [])
+    .filter((words) => words.length > 0);
 }
 
 function scorePureSearchWindow(words: string[], start: number, totalWords: number) {
@@ -832,6 +832,7 @@ function extractPureWordSearchQueries(
     .map((sentence) => sentence.trim())
     .filter(Boolean);
   const pools = sentenceTexts.length > 0 ? sentenceTexts : [normalizedText];
+  const wordSegments = pools.flatMap((pool) => getPureSearchWordSegments(pool));
 
   type Candidate = {
     text: string;
@@ -841,9 +842,7 @@ function extractPureWordSearchQueries(
 
   const candidates: Candidate[] = [];
 
-  pools.forEach((pool) => {
-    const words = getPureSearchWords(pool);
-
+  wordSegments.forEach((words) => {
     for (let windowSize = maxWords; windowSize >= minWords; windowSize -= 1) {
       if (words.length < windowSize) continue;
 
@@ -874,9 +873,10 @@ function extractPureWordSearchQueries(
   });
 
   if (candidates.length === 0) {
-    const fallbackWords = getPureSearchWords(normalizedText);
-    const fallbackSize = Math.min(Math.max(minWords, 1), fallbackWords.length);
-    const fallback = normalizeExtractedSearchQuery(fallbackWords.slice(0, fallbackSize).join(' '));
+    const fallbackWords = wordSegments
+      .filter((words) => words.length >= minWords)
+      .sort((left, right) => right.length - left.length)[0];
+    const fallback = normalizeExtractedSearchQuery(fallbackWords?.slice(0, maxWords).join(' ') ?? '');
     return fallback ? [fallback] : [];
   }
 
