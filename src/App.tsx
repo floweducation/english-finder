@@ -9,6 +9,7 @@ import {
   BookOpen,
   Check,
   Copy,
+  Download,
   ExternalLink,
   FileSearch,
   Info,
@@ -461,6 +462,140 @@ function formatCopyAsParagraphs(value?: string) {
 
 function formatDisplayParagraph(value?: string) {
   return formatCopyAsParagraphs(value).replace(/\s+/g, ' ').trim();
+}
+
+function escapeHtml(value?: string) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function highlightHtml(text: string, query: string, style: string) {
+  const cleanText = formatDisplayParagraph(text);
+  const cleanQuery = sanitizeSearchQuery(query);
+  const tokens = cleanQuery.match(/[A-Za-z0-9]+(?:'[A-Za-z0-9]+)?/g) ?? [];
+
+  if (!cleanText || tokens.length === 0) {
+    return escapeHtml(cleanText);
+  }
+
+  const separatorPattern = String.raw`(?:[\s,;:!?()[\]{}"“”‘’—–-]+)`;
+  const regex = new RegExp(tokens.map((token) => escapeRegex(token)).join(separatorPattern), 'ig');
+  let lastIndex = 0;
+  let output = '';
+
+  cleanText.replace(regex, (match, offset: number) => {
+    output += escapeHtml(cleanText.slice(lastIndex, offset));
+    output += `<mark style="${style}">${escapeHtml(match)}</mark>`;
+    lastIndex = offset + match.length;
+    return match;
+  });
+
+  output += escapeHtml(cleanText.slice(lastIndex));
+  return output;
+}
+
+function buildTistoryGoogleBookHtml(result: BatchSearchResult) {
+  const query = getBatchGoogleDisplayQuery(result);
+  const googleSearchUrl = buildGoogleBooksSearchUrl(query);
+  const book = result.googleResults[0];
+
+  if (result.status === 'searching') {
+    return '<p style="margin:0;color:#64748b;font-size:14px;line-height:1.7;">Google Books 검색 중입니다.</p>';
+  }
+
+  if (result.googleError) {
+    return `<p style="margin:0;color:#e11d48;font-size:14px;line-height:1.7;">${escapeHtml(result.googleError)}</p>`;
+  }
+
+  if (!book) {
+    return [
+      '<p style="margin:0 0 10px;color:#64748b;font-size:14px;line-height:1.7;">Google Books 후보가 없습니다.</p>',
+      `<a href="${escapeHtml(googleSearchUrl)}" target="_blank" rel="noopener noreferrer" style="display:inline-block;border-radius:999px;background:#eef2ff;color:#4338ca;text-decoration:none;font-size:13px;font-weight:700;padding:7px 12px;">Google Books 원본 검색</a>`,
+    ].join('\n');
+  }
+
+  const review = assessGoogleBookMatch(book, result.text, query);
+  const reviewColor = review.level === 'match' ? '#047857' : review.level === 'warning' ? '#b45309' : '#be123c';
+  const reviewBg = review.level === 'match' ? '#ecfdf5' : review.level === 'warning' ? '#fffbeb' : '#fff1f2';
+  const authorLine = [formatAuthors(book.authors), book.publishedDate].filter(Boolean).join(' · ');
+
+  return [
+    '<div style="overflow:hidden;">',
+    book.thumbnail
+      ? `<img src="${escapeHtml(book.thumbnail)}" alt="${escapeHtml(book.title)}" style="float:left;width:72px;height:108px;object-fit:cover;border-radius:10px;background:#f1f5f9;margin:0 14px 10px 0;" />`
+      : '',
+    `<p style="margin:0 0 6px;color:#1e293b;font-size:18px;line-height:1.45;font-weight:800;">${escapeHtml(book.title)}</p>`,
+    `<p style="margin:0 0 10px;color:#64748b;font-size:14px;line-height:1.6;">${escapeHtml(authorLine)}</p>`,
+    book.snippet
+      ? `<p style="margin:0 0 12px;color:#475569;font-size:14px;line-height:1.75;">${highlightHtml(book.snippet, query, 'background:#fde68a;color:inherit;border-radius:4px;padding:0 2px;')}</p>`
+      : '',
+    `<p style="clear:both;margin:0 0 12px;border-radius:12px;background:${reviewBg};color:${reviewColor};font-size:13px;line-height:1.65;padding:10px 12px;"><strong>${escapeHtml(review.label)}</strong><br />${escapeHtml(review.message)}</p>`,
+    '<p style="margin:0;">',
+    `<a href="${escapeHtml(googleSearchUrl)}" target="_blank" rel="noopener noreferrer" style="display:inline-block;margin:0 6px 6px 0;border-radius:999px;background:#eef2ff;color:#4338ca;text-decoration:none;font-size:13px;font-weight:700;padding:7px 12px;">Google Books 열기</a>`,
+    `<a href="${escapeHtml(book.previewLink || googleSearchUrl)}" target="_blank" rel="noopener noreferrer" style="display:inline-block;margin:0 6px 6px 0;border-radius:999px;background:#f5f3ff;color:#6d28d9;text-decoration:none;font-size:13px;font-weight:700;padding:7px 12px;">미리보기</a>`,
+    `<a href="${escapeHtml(book.infoLink || googleSearchUrl)}" target="_blank" rel="noopener noreferrer" style="display:inline-block;margin:0 0 6px 0;border-radius:999px;background:#f1f5f9;color:#334155;text-decoration:none;font-size:13px;font-weight:700;padding:7px 12px;">도서 정보</a>`,
+    '</p>',
+    '</div>',
+  ].join('\n');
+}
+
+function buildTistoryExportHtml(results: BatchSearchResult[]) {
+  const exportedAt = new Date().toLocaleString('ko-KR', {
+    timeZone: VISITOR_COUNTER_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+
+  const cards = results
+    .map((result) => {
+      const query = getBatchGoogleDisplayQuery(result);
+
+      return [
+        '<article style="box-sizing:border-box;margin:0 0 18px;padding:18px;border:1px solid #dbe3ef;border-radius:16px;background:#ffffff;">',
+        `<h3 style="margin:0 0 14px;color:#1e293b;font-size:19px;line-height:1.45;font-weight:800;">${escapeHtml(result.id)}</h3>`,
+        '<div style="margin:0 0 16px;">',
+        '<p style="margin:0 0 6px;color:#64748b;font-size:13px;font-weight:800;letter-spacing:.04em;">본문텍스트 / 검색 문구</p>',
+        `<p style="margin:0;color:#334155;font-size:14px;line-height:1.8;">${highlightHtml(result.text, query, 'background:#fde68a;color:inherit;border-radius:4px;padding:0 2px;')}</p>`,
+        query
+          ? `<p style="margin:10px 0 0;border-radius:12px;background:#fffbeb;color:#92400e;font-size:13px;line-height:1.65;padding:9px 11px;">Google Books 검색 문구: <strong>${escapeHtml(query)}</strong></p>`
+          : '',
+        '</div>',
+        '<div>',
+        '<p style="margin:0 0 8px;color:#64748b;font-size:13px;font-weight:800;letter-spacing:.04em;">Google Books</p>',
+        buildTistoryGoogleBookHtml(result),
+        '</div>',
+        '</article>',
+      ].join('\n');
+    })
+    .join('\n');
+
+  return [
+    '<div style="box-sizing:border-box;max-width:760px;margin:0 auto;color:#334155;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Apple SD Gothic Neo,Noto Sans KR,Malgun Gothic,sans-serif;">',
+    '<h2 style="margin:0 0 8px;color:#111827;font-size:24px;line-height:1.35;font-weight:900;">English Finder 일괄검색 결과</h2>',
+    `<p style="margin:0 0 18px;color:#94a3b8;font-size:13px;line-height:1.6;">생성 시각: ${escapeHtml(exportedAt)}</p>`,
+    cards || '<p style="margin:0;color:#64748b;font-size:14px;line-height:1.7;">내보낼 결과가 없습니다.</p>',
+    '</div>',
+  ].join('\n');
+}
+
+function downloadHtmlFile(filename: string, html: string) {
+  const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
 }
 
 function buildComparisonPromptTemplate() {
@@ -1431,9 +1566,11 @@ function BatchFinderApp() {
   const [rawInput, setRawInput] = useState('');
   const [results, setResults] = useState<BatchSearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
+  const [copiedTistoryHtml, setCopiedTistoryHtml] = useState(false);
 
   const parsedItems = useMemo(() => parseBatchInput(rawInput), [rawInput]);
   const completedCount = results.filter((result) => result.status === 'done' || result.status === 'error').length;
+  const tistoryHtml = useMemo(() => buildTistoryExportHtml(results), [results]);
 
   const updateResult = useCallback((id: string, updater: (result: BatchSearchResult) => BatchSearchResult) => {
     setResults((currentResults) => currentResults.map((result) => (result.id === id ? updater(result) : result)));
@@ -1480,6 +1617,20 @@ function BatchFinderApp() {
 
     setIsSearching(false);
   }, [isSearching, parsedItems, updateResult]);
+
+  const handleCopyTistoryHtml = useCallback(async () => {
+    if (!tistoryHtml || results.length === 0) return;
+
+    await navigator.clipboard.writeText(tistoryHtml);
+    setCopiedTistoryHtml(true);
+    window.setTimeout(() => setCopiedTistoryHtml(false), 2000);
+  }, [results.length, tistoryHtml]);
+
+  const handleDownloadTistoryHtml = useCallback(() => {
+    if (!tistoryHtml || results.length === 0) return;
+
+    downloadHtmlFile(`english-finder-tistory-${new Date().toISOString().slice(0, 10)}.html`, tistoryHtml);
+  }, [results.length, tistoryHtml]);
 
   return (
     <div className="min-h-screen bg-[#f8f9fa] text-slate-900 font-sans selection:bg-indigo-100">
@@ -1640,6 +1791,43 @@ function BatchFinderApp() {
                   </article>
                 ))}
               </div>
+            </section>
+          )}
+
+          {results.length > 0 && (
+            <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div className="space-y-2">
+                  <h3 className="text-lg font-bold text-slate-800">티스토리용 HTML</h3>
+                  <p className="text-sm leading-6 text-slate-500">
+                    티스토리 HTML 모드에 붙여넣기 좋게 카드형 HTML로 정리합니다. WorksheetMaker 열은 제외하고 지문번호, 본문텍스트/검색 문구, Google Books 결과만 포함합니다.
+                  </p>
+                </div>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <button
+                    onClick={handleCopyTistoryHtml}
+                    disabled={results.length === 0}
+                    className="inline-flex items-center justify-center gap-2 rounded-2xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-indigo-100 transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+                  >
+                    {copiedTistoryHtml ? <Check size={16} /> : <Copy size={16} />}
+                    {copiedTistoryHtml ? '복사됨' : 'HTML 복사'}
+                  </button>
+                  <button
+                    onClick={handleDownloadTistoryHtml}
+                    disabled={results.length === 0}
+                    className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300"
+                  >
+                    <Download size={16} />
+                    HTML 다운로드
+                  </button>
+                </div>
+              </div>
+              <textarea
+                value={tistoryHtml}
+                readOnly
+                className="mt-4 h-72 w-full resize-y rounded-2xl border border-slate-200 bg-slate-50 p-4 font-mono text-xs leading-5 text-slate-700 outline-none focus:border-transparent focus:ring-2 focus:ring-indigo-500"
+                aria-label="티스토리용 HTML 코드"
+              />
             </section>
           )}
         </motion.div>
