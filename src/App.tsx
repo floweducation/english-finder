@@ -52,6 +52,28 @@ type HighlightPattern = {
   className: string;
 };
 
+type TextToken = {
+  value: string;
+  start: number;
+  end: number;
+};
+
+type PhraseContext = {
+  text: string;
+  before: string[];
+  after: string[];
+  found: boolean;
+};
+
+type GoogleBookMatchReview = {
+  level: 'match' | 'warning' | 'mismatch';
+  label: string;
+  message: string;
+  score: number;
+  sourceContext: string;
+  googleContext: string;
+};
+
 type VisitorStats = {
   enabled: boolean;
   total: number;
@@ -632,7 +654,7 @@ async function fetchWorksheetMaker(query: string): Promise<WorksheetSearchRespon
 
 function buildGoogleBooksSearchUrl(query: string) {
   const normalized = sanitizeSearchQuery(query);
-  return `${GOOGLE_BOOKS_PAGE_URL}${encodeURIComponent(normalized)}`;
+  return `${GOOGLE_BOOKS_PAGE_URL}${encodeURIComponent(`"${normalized}"`)}`;
 }
 
 function openWorksheetMakerSearch(query: string) {
@@ -763,6 +785,188 @@ function uniqueSearchQueries(queries: string[]) {
   );
 }
 
+function tokenizeForReview(text: string): TextToken[] {
+  const tokens: TextToken[] = [];
+  const matcher = /[A-Za-z0-9]+/g;
+  let match: RegExpExecArray | null;
+
+  while ((match = matcher.exec(text)) !== null) {
+    tokens.push({
+      value: match[0].toLowerCase(),
+      start: match.index,
+      end: match.index + match[0].length,
+    });
+  }
+
+  return tokens;
+}
+
+function extractPhraseContext(text: string, phrase: string, displayRadius = 14, compareRadius = 8): PhraseContext {
+  const tokens = tokenizeForReview(text);
+  const phraseTokens = tokenizeForReview(phrase).map((token) => token.value);
+
+  if (tokens.length === 0 || phraseTokens.length === 0 || tokens.length < phraseTokens.length) {
+    return {
+      text: '',
+      before: [],
+      after: [],
+      found: false,
+    };
+  }
+
+  let phraseStart = -1;
+
+  for (let index = 0; index <= tokens.length - phraseTokens.length; index += 1) {
+    const matches = phraseTokens.every((phraseToken, phraseIndex) => tokens[index + phraseIndex]?.value === phraseToken);
+
+    if (matches) {
+      phraseStart = index;
+      break;
+    }
+  }
+
+  if (phraseStart === -1) {
+    return {
+      text: '',
+      before: [],
+      after: [],
+      found: false,
+    };
+  }
+
+  const phraseEnd = phraseStart + phraseTokens.length;
+  const displayStart = Math.max(0, phraseStart - displayRadius);
+  const displayEnd = Math.min(tokens.length - 1, phraseEnd + displayRadius - 1);
+  const rawContext = text.slice(tokens[displayStart].start, tokens[displayEnd].end).replace(/\s+/g, ' ').trim();
+
+  return {
+    text: `${displayStart > 0 ? '... ' : ''}${rawContext}${displayEnd < tokens.length - 1 ? ' ...' : ''}`,
+    before: tokens.slice(Math.max(0, phraseStart - compareRadius), phraseStart).map((token) => token.value),
+    after: tokens.slice(phraseEnd, Math.min(tokens.length, phraseEnd + compareRadius)).map((token) => token.value),
+    found: true,
+  };
+}
+
+function isUsefulReviewToken(token: string) {
+  return token.length >= 4 && !STOP_WORDS.has(token) && !/^\d+$/.test(token);
+}
+
+function countSharedReviewTokens(left: string[], right: string[]) {
+  const rightSet = new Set(right.filter(isUsefulReviewToken));
+  return new Set(left.filter(isUsefulReviewToken).filter((token) => rightSet.has(token))).size;
+}
+
+function countUsefulReviewTokens(tokens: string[]) {
+  return tokens.filter(isUsefulReviewToken).length;
+}
+
+function assessGoogleBookMatch(result: GoogleBookResult, sourceText: string, query: string): GoogleBookMatchReview {
+  const sourceContext = extractPhraseContext(sourceText, query);
+  const googleContext = extractPhraseContext(result.snippet || '', query);
+
+  if (!sourceContext.found) {
+    return {
+      level: 'warning',
+      label: '검색 문구 확인 필요',
+      message: '입력 본문에서 선택된 검색 문구를 다시 찾지 못했습니다.',
+      score: 1,
+      sourceContext: sourceText.slice(0, 220),
+      googleContext: result.snippet || 'Google Books 스니펫 없음',
+    };
+  }
+
+  if (!result.snippet) {
+    return {
+      level: 'warning',
+      label: '스니펫 확인 필요',
+      message: 'Google Books가 주변 문맥 스니펫을 제공하지 않아 책 정보를 직접 열어 확인해야 합니다.',
+      score: 2,
+      sourceContext: sourceContext.text,
+      googleContext: 'Google Books 스니펫 없음',
+    };
+  }
+
+  if (!googleContext.found) {
+    return {
+      level: 'warning',
+      label: '스니펫 확인 필요',
+      message: 'Google Books 결과는 있었지만 스니펫에서 정확한 검색 문구를 확인하지 못했습니다.',
+      score: 2,
+      sourceContext: sourceContext.text,
+      googleContext: result.snippet,
+    };
+  }
+
+  const beforeOverlap = countSharedReviewTokens(sourceContext.before, googleContext.before);
+  const afterOverlap = countSharedReviewTokens(sourceContext.after, googleContext.after);
+  const sharedContextCount = beforeOverlap + afterOverlap;
+  const comparableContextCount =
+    countUsefulReviewTokens(sourceContext.before) +
+    countUsefulReviewTokens(sourceContext.after) +
+    countUsefulReviewTokens(googleContext.before) +
+    countUsefulReviewTokens(googleContext.after);
+
+  if (sharedContextCount >= 2) {
+    return {
+      level: 'match',
+      label: '전후문맥 일부 일치',
+      message: '검색 문구뿐 아니라 주변 단어도 입력 본문과 일부 겹칩니다.',
+      score: 10 + sharedContextCount,
+      sourceContext: sourceContext.text,
+      googleContext: googleContext.text,
+    };
+  }
+
+  if (sharedContextCount === 1 || comparableContextCount < 4) {
+    return {
+      level: 'warning',
+      label: '추가 확인 권장',
+      message: '검색 문구는 확인됐지만 주변 문맥 비교 근거가 충분하지 않습니다.',
+      score: 5 + sharedContextCount,
+      sourceContext: sourceContext.text,
+      googleContext: googleContext.text,
+    };
+  }
+
+  return {
+    level: 'mismatch',
+    label: '문맥 검토 필요',
+    message: '검색 문구는 일치하지만 앞뒤 단어가 입력 본문과 거의 겹치지 않습니다.',
+    score: 0,
+    sourceContext: sourceContext.text,
+    googleContext: googleContext.text,
+  };
+}
+
+function rankGoogleResultsForSource(results: GoogleBookResult[], sourceText: string, query: string) {
+  return [...results].sort((left, right) => {
+    const leftScore = assessGoogleBookMatch(left, sourceText, query).score;
+    const rightScore = assessGoogleBookMatch(right, sourceText, query).score;
+    return rightScore - leftScore;
+  });
+}
+
+function getGoogleReviewStyles(level: GoogleBookMatchReview['level']) {
+  if (level === 'match') {
+    return {
+      box: 'bg-emerald-50 text-emerald-800',
+      icon: 'text-emerald-600',
+    };
+  }
+
+  if (level === 'warning') {
+    return {
+      box: 'bg-amber-50 text-amber-800',
+      icon: 'text-amber-600',
+    };
+  }
+
+  return {
+    box: 'bg-rose-50 text-rose-800',
+    icon: 'text-rose-600',
+  };
+}
+
 function extractDistinctSearchQueries(text: string, limit = MAX_BATCH_QUERY_ATTEMPTS) {
   const enhancedQueries = uniqueSearchQueries(extractEnhancementQueries(text, ''));
 
@@ -848,7 +1052,7 @@ function createEmptyBatchResult(item: BatchInputItem): BatchSearchResult {
   };
 }
 
-function GoogleBooksMiniResult({ result, query }: { result?: GoogleBookResult; query: string }) {
+function GoogleBooksMiniResult({ result, query, sourceText }: { result?: GoogleBookResult; query: string; sourceText: string }) {
   if (!result) {
     return (
       <div className="space-y-3">
@@ -861,6 +1065,9 @@ function GoogleBooksMiniResult({ result, query }: { result?: GoogleBookResult; q
       </div>
     );
   }
+
+  const review = assessGoogleBookMatch(result, sourceText, query);
+  const reviewStyles = getGoogleReviewStyles(review.level);
 
   return (
     <div className="rounded-2xl border border-slate-200 p-3">
@@ -892,6 +1099,32 @@ function GoogleBooksMiniResult({ result, query }: { result?: GoogleBookResult; q
               {highlightTextWithPatterns(result.snippet, [{ text: query, className: 'bg-amber-200/80' }])}
             </p>
           )}
+          <div className={`space-y-2 rounded-xl px-3 py-2 text-xs leading-5 ${reviewStyles.box}`}>
+            <div className="flex items-start gap-2">
+              {review.level === 'match' ? (
+                <Check size={14} className={`mt-0.5 shrink-0 ${reviewStyles.icon}`} />
+              ) : (
+                <AlertCircle size={14} className={`mt-0.5 shrink-0 ${reviewStyles.icon}`} />
+              )}
+              <div>
+                <p className="font-semibold">{review.label}</p>
+                <p>{review.message}</p>
+              </div>
+            </div>
+            <details>
+              <summary className="cursor-pointer font-semibold">원문 / Google 스니펫 비교</summary>
+              <div className="mt-2 space-y-2">
+                <p>
+                  <span className="font-semibold">입력 본문: </span>
+                  {highlightTextWithPatterns(review.sourceContext, [{ text: query, className: 'bg-amber-200/80' }])}
+                </p>
+                <p>
+                  <span className="font-semibold">Google: </span>
+                  {highlightTextWithPatterns(review.googleContext, [{ text: query, className: 'bg-amber-200/80' }])}
+                </p>
+              </div>
+            </details>
+          </div>
           <div className="flex flex-wrap gap-2 pt-1">
             <a href={buildGoogleBooksSearchUrl(query)} target="_blank" rel="noreferrer" className="rounded-full bg-indigo-50 px-3 py-1.5 text-xs font-medium text-indigo-700 hover:bg-indigo-100">
               Google Books 열기
@@ -1003,7 +1236,7 @@ function BatchFinderApp() {
         ]);
 
         if (!googleQuery && googleResponse.status === 'fulfilled') {
-          selectedGoogleResults = googleResponse.value;
+          selectedGoogleResults = rankGoogleResultsForSource(googleResponse.value, item.text, query);
           googleError = '';
           if (selectedGoogleResults.length > 0) {
             googleQuery = query;
@@ -1177,7 +1410,7 @@ function BatchFinderApp() {
                       ) : result.googleError ? (
                         <p className="text-sm leading-6 text-rose-600">{result.googleError}</p>
                       ) : (
-                        <GoogleBooksMiniResult result={result.googleResults[0]} query={result.googleQuery || result.query} />
+                        <GoogleBooksMiniResult result={result.googleResults[0]} query={result.googleQuery || result.query} sourceText={result.text} />
                       )}
                     </div>
 

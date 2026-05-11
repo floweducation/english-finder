@@ -16,11 +16,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    let searchResponse = await requestGoogleBooks({ query, apiKey, exact: true });
-
-    if (searchResponse.results.length === 0) {
-      searchResponse = await requestGoogleBooks({ query, apiKey, exact: false });
-    }
+    const searchResponse = await requestGoogleBooks({ query, apiKey });
 
     res.setHeader('Cache-Control', 's-maxage=3600, stale-while-revalidate=86400');
     return res.status(200).json({
@@ -36,11 +32,11 @@ export default async function handler(req, res) {
   }
 }
 
-async function requestGoogleBooks({ query, apiKey, exact }) {
+async function requestGoogleBooks({ query, apiKey }) {
   const url =
     'https://www.googleapis.com/books/v1/volumes?' +
     new URLSearchParams({
-      q: exact ? `"${query}"` : query,
+      q: `"${query}"`,
       maxResults: '5',
       langRestrict: 'en',
       printType: 'books',
@@ -60,7 +56,7 @@ async function requestGoogleBooks({ query, apiKey, exact }) {
   }
 
   return {
-    searchMode: exact ? 'exact' : 'broad',
+    searchMode: 'exact',
     results: (data.items || []).map((item) => {
       const viewability = item.accessInfo?.viewability || 'UNKNOWN';
       const accessViewStatus = item.accessInfo?.accessViewStatus || 'NONE';
