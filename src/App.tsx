@@ -622,7 +622,7 @@ function buildLlmInputPackage({
 }
 
 async function fetchGoogleBooks(query: string): Promise<GoogleBookResult[]> {
-  const response = await fetch(`/api/google-books-search?q=${encodeURIComponent(query)}`);
+  const response = await fetch(`/api/google-books-search?q=${encodeURIComponent(query)}&v=2`);
 
   if (!response.ok) {
     const errorPayload = await response.json().catch(() => null);

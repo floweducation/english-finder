@@ -33,10 +33,34 @@ export default async function handler(req, res) {
 }
 
 async function requestGoogleBooks({ query, apiKey }) {
+  const exactResults = await requestGoogleBooksApi({
+    apiKey,
+    searchQuery: `"${query}"`,
+  });
+
+  if (exactResults.length > 0) {
+    return {
+      searchMode: 'exact',
+      results: exactResults,
+    };
+  }
+
+  const broadResults = await requestGoogleBooksApi({
+    apiKey,
+    searchQuery: query,
+  });
+
+  return {
+    searchMode: broadResults.length > 0 ? 'broad-fallback' : 'exact',
+    results: broadResults,
+  };
+}
+
+async function requestGoogleBooksApi({ searchQuery, apiKey }) {
   const url =
     'https://www.googleapis.com/books/v1/volumes?' +
     new URLSearchParams({
-      q: `"${query}"`,
+      q: searchQuery,
       maxResults: '5',
       langRestrict: 'en',
       printType: 'books',
@@ -55,34 +79,31 @@ async function requestGoogleBooks({ query, apiKey }) {
     throw new Error(data?.error?.message || 'Google Books 요청에 실패했습니다.');
   }
 
-  return {
-    searchMode: 'exact',
-    results: (data.items || []).map((item) => {
-      const viewability = item.accessInfo?.viewability || 'UNKNOWN';
-      const accessViewStatus = item.accessInfo?.accessViewStatus || 'NONE';
-      const webReaderLink = item.accessInfo?.webReaderLink;
-      const publicDomain = Boolean(item.accessInfo?.publicDomain);
-      const previewLink = item.volumeInfo?.previewLink;
-      const previewAvailable =
-        accessViewStatus === 'FULL_PUBLIC_DOMAIN' ||
-        (publicDomain && viewability === 'ALL_PAGES' && Boolean(webReaderLink) && Boolean(previewLink));
+  return (data.items || []).map((item) => {
+    const viewability = item.accessInfo?.viewability || 'UNKNOWN';
+    const accessViewStatus = item.accessInfo?.accessViewStatus || 'NONE';
+    const webReaderLink = item.accessInfo?.webReaderLink;
+    const publicDomain = Boolean(item.accessInfo?.publicDomain);
+    const previewLink = item.volumeInfo?.previewLink;
+    const previewAvailable =
+      accessViewStatus === 'FULL_PUBLIC_DOMAIN' ||
+      (publicDomain && viewability === 'ALL_PAGES' && Boolean(webReaderLink) && Boolean(previewLink));
 
-      return {
-        id: item.id,
-        title: item.volumeInfo?.title || '제목 없음',
-        authors: item.volumeInfo?.authors || [],
-        publishedDate: item.volumeInfo?.publishedDate,
-        thumbnail: item.volumeInfo?.imageLinks?.thumbnail,
-        previewLink,
-        infoLink: item.volumeInfo?.infoLink,
-        webReaderLink,
-        snippet: String(item.searchInfo?.textSnippet || '')
-          .replace(/<[^>]+>/g, '')
-          .trim(),
-        viewability,
-        accessViewStatus,
-        previewAvailable,
-      };
-    }),
-  };
+    return {
+      id: item.id,
+      title: item.volumeInfo?.title || '제목 없음',
+      authors: item.volumeInfo?.authors || [],
+      publishedDate: item.volumeInfo?.publishedDate,
+      thumbnail: item.volumeInfo?.imageLinks?.thumbnail,
+      previewLink,
+      infoLink: item.volumeInfo?.infoLink,
+      webReaderLink,
+      snippet: String(item.searchInfo?.textSnippet || '')
+        .replace(/<[^>]+>/g, '')
+        .trim(),
+      viewability,
+      accessViewStatus,
+      previewAvailable,
+    };
+  });
 }
