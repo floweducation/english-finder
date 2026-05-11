@@ -1094,7 +1094,7 @@ function rankGoogleResultsForSource(results: GoogleBookResult[], sourceText: str
 }
 
 function getReliableGoogleResults(results: GoogleBookResult[], sourceText: string, query: string) {
-  return rankGoogleResultsForSource(results, sourceText, query).filter((result) => assessGoogleBookMatch(result, sourceText, query).level !== 'mismatch');
+  return rankGoogleResultsForSource(results, sourceText, query).filter((result) => assessGoogleBookMatch(result, sourceText, query).score >= 5);
 }
 
 function getPassageContextPreview(text: string, query: string, displayRadius = 18) {
