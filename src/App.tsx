@@ -459,6 +459,10 @@ function formatCopyAsParagraphs(value?: string) {
     .trim();
 }
 
+function formatDisplayParagraph(value?: string) {
+  return formatCopyAsParagraphs(value).replace(/\s+/g, ' ').trim();
+}
+
 function buildComparisonPromptTemplate() {
   return [
     '다음 형식으로 출력해줘.',
@@ -2264,8 +2268,8 @@ function SingleFinderApp() {
                         <div className="space-y-3">
                           <div>
                             <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-slate-400">영어 지문</p>
-                            <p className="whitespace-pre-line text-sm leading-6 text-slate-700">
-                              {highlightTextWithPatterns(getPassageContextPreview(result.passage, lastQuery), worksheetHighlightPatterns)}
+                            <p className="text-sm leading-7 text-slate-700">
+                              {highlightTextWithPatterns(formatDisplayParagraph(result.passage), worksheetHighlightPatterns)}
                             </p>
                           </div>
 
@@ -2285,7 +2289,7 @@ function SingleFinderApp() {
                           {result.translationPreview && (
                             <details className="rounded-xl bg-slate-50 p-3 text-sm text-slate-600">
                               <summary className="cursor-pointer font-medium text-slate-700">해석 미리보기</summary>
-                              <p className="mt-3 whitespace-pre-line leading-6">{result.translationPreview}</p>
+                              <p className="mt-3 leading-7">{formatDisplayParagraph(result.translationPreview)}</p>
                             </details>
                           )}
                         </div>
