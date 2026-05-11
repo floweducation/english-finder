@@ -69,6 +69,8 @@ type BatchInputItem = {
 type BatchSearchResult = BatchInputItem & {
   status: 'idle' | 'searching' | 'done' | 'error';
   query: string;
+  googleQuery: string;
+  worksheetQuery: string;
   attempts: string[];
   googleResults: GoogleBookResult[];
   googleError: string;
@@ -630,7 +632,7 @@ async function fetchWorksheetMaker(query: string): Promise<WorksheetSearchRespon
 
 function buildGoogleBooksSearchUrl(query: string) {
   const normalized = sanitizeSearchQuery(query);
-  return `${GOOGLE_BOOKS_PAGE_URL}${encodeURIComponent(`"${normalized}"`)}`;
+  return `${GOOGLE_BOOKS_PAGE_URL}${encodeURIComponent(normalized)}`;
 }
 
 function openWorksheetMakerSearch(query: string) {
@@ -745,8 +747,24 @@ function scoreFallbackQueryWindow(words: string[]) {
   return uncommonWords.length * 3 + uniqueWords.size * 0.7 + averageLength - (startsWithStopWord ? 0.7 : 0) - (endsWithStopWord ? 0.7 : 0);
 }
 
+function normalizeExtractedSearchQuery(value: string) {
+  const withoutPossessives = value.replace(/\b([A-Za-z]+)['’]s\b/g, '$1');
+  return (withoutPossessives.replace(/['’]/g, '').match(/[A-Za-z0-9]+/g) ?? []).join(' ').trim();
+}
+
+function uniqueSearchQueries(queries: string[]) {
+  return Array.from(
+    new Map(
+      queries
+        .map(normalizeExtractedSearchQuery)
+        .filter(Boolean)
+        .map((query) => [query.toLowerCase(), query]),
+    ).values(),
+  );
+}
+
 function extractDistinctSearchQueries(text: string, limit = MAX_BATCH_QUERY_ATTEMPTS) {
-  const enhancedQueries = extractEnhancementQueries(text, '');
+  const enhancedQueries = uniqueSearchQueries(extractEnhancementQueries(text, ''));
 
   if (enhancedQueries.length > 0) {
     return enhancedQueries.slice(0, limit);
@@ -770,7 +788,7 @@ function extractDistinctSearchQueries(text: string, limit = MAX_BATCH_QUERY_ATTE
       }
 
       candidates.push({
-        text: sanitizeSearchQuery(windowWords.join(' ')),
+        text: normalizeExtractedSearchQuery(windowWords.join(' ')),
         score: scoreFallbackQueryWindow(windowWords),
         tokens: windowWords.map((word) => word.toLowerCase()),
       });
@@ -812,7 +830,7 @@ function extractDistinctSearchQueries(text: string, limit = MAX_BATCH_QUERY_ATTE
     return selected.map((candidate) => candidate.text);
   }
 
-  return [sanitizeSearchQuery(words.slice(0, Math.min(words.length, 8)).join(' '))].filter(Boolean);
+  return uniqueSearchQueries([words.slice(0, Math.min(words.length, 8)).join(' ')]).filter(Boolean);
 }
 
 function createEmptyBatchResult(item: BatchInputItem): BatchSearchResult {
@@ -820,6 +838,8 @@ function createEmptyBatchResult(item: BatchInputItem): BatchSearchResult {
     ...item,
     status: 'idle',
     query: '',
+    googleQuery: '',
+    worksheetQuery: '',
     attempts: [],
     googleResults: [],
     googleError: '',
@@ -843,20 +863,47 @@ function GoogleBooksMiniResult({ result, query }: { result?: GoogleBookResult; q
   }
 
   return (
-    <div className="space-y-2">
-      <p className="font-semibold leading-6 text-slate-800">{highlightTextWithPatterns(result.title, [{ text: query, className: 'bg-amber-200/80' }])}</p>
-      <p className="text-xs leading-5 text-slate-500">
-        {result.authors.length > 0 ? result.authors.join(', ') : '저자 정보 없음'}
-        {result.publishedDate ? ` · ${result.publishedDate}` : ''}
-      </p>
-      {result.snippet && <p className="line-clamp-4 text-sm leading-6 text-slate-600">{highlightTextWithPatterns(result.snippet, [{ text: query, className: 'bg-amber-200/80' }])}</p>}
-      <div className="flex flex-wrap gap-2 pt-1">
-        <a href={buildGoogleBooksSearchUrl(query)} target="_blank" rel="noreferrer" className="rounded-full bg-indigo-50 px-3 py-1.5 text-xs font-medium text-indigo-700 hover:bg-indigo-100">
-          Google Books
-        </a>
-        <a href={result.previewLink || result.infoLink || buildGoogleBooksSearchUrl(query)} target="_blank" rel="noreferrer" className="rounded-full bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-200">
-          도서 링크
-        </a>
+    <div className="rounded-2xl border border-slate-200 p-3">
+      <div className="flex gap-3">
+        <div className="flex h-24 w-16 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-slate-100">
+          {result.thumbnail ? (
+            <img
+              src={result.thumbnail}
+              alt={result.title}
+              className="h-full w-full object-cover"
+              referrerPolicy="no-referrer"
+            />
+          ) : (
+            <BookOpen size={18} className="text-slate-400" />
+          )}
+        </div>
+        <div className="min-w-0 flex-1 space-y-2">
+          <div>
+            <p className="line-clamp-2 text-base font-semibold leading-6 text-slate-800">
+              {highlightTextWithPatterns(result.title, [{ text: query, className: 'bg-amber-200/80' }])}
+            </p>
+            <p className="mt-1 text-xs leading-5 text-slate-500">
+              {result.authors.length > 0 ? result.authors.join(', ') : '저자 정보 없음'}
+              {result.publishedDate ? ` · ${result.publishedDate}` : ''}
+            </p>
+          </div>
+          {result.snippet && (
+            <p className="line-clamp-4 text-sm leading-6 text-slate-600">
+              {highlightTextWithPatterns(result.snippet, [{ text: query, className: 'bg-amber-200/80' }])}
+            </p>
+          )}
+          <div className="flex flex-wrap gap-2 pt-1">
+            <a href={buildGoogleBooksSearchUrl(query)} target="_blank" rel="noreferrer" className="rounded-full bg-indigo-50 px-3 py-1.5 text-xs font-medium text-indigo-700 hover:bg-indigo-100">
+              Google Books 열기
+            </a>
+            <a href={result.previewLink || buildGoogleBooksSearchUrl(query)} target="_blank" rel="noreferrer" className="rounded-full bg-violet-50 px-3 py-1.5 text-xs font-medium text-violet-700 hover:bg-violet-100">
+              미리보기
+            </a>
+            <a href={result.infoLink || buildGoogleBooksSearchUrl(query)} target="_blank" rel="noreferrer" className="rounded-full bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-200">
+              도서 정보
+            </a>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -936,41 +983,60 @@ function BatchFinderApp() {
       }));
 
       let selectedQuery = attempts[0] ?? '';
+      let googleQuery = '';
+      let worksheetQuery = '';
       let selectedGoogleResults: GoogleBookResult[] = [];
       let selectedWorksheetResults: WorksheetSearchResponse | null = null;
+      let fallbackWorksheetResults: WorksheetSearchResponse | null = null;
       let googleError = '';
       let worksheetError = '';
 
       for (const query of attempts) {
         selectedQuery = query;
         const [googleResponse, worksheetResponse] = await Promise.allSettled([
-          fetchGoogleBooks(query),
-          countWords(query) >= MIN_WORKSHEET_WORDS ? fetchWorksheetMaker(query) : Promise.resolve({ query, resultCount: 0, results: [] }),
+          googleQuery ? Promise.resolve(selectedGoogleResults) : fetchGoogleBooks(query),
+          worksheetQuery
+            ? Promise.resolve(selectedWorksheetResults)
+            : countWords(query) >= MIN_WORKSHEET_WORDS
+              ? fetchWorksheetMaker(query)
+              : Promise.resolve({ query, resultCount: 0, results: [] }),
         ]);
 
-        if (googleResponse.status === 'fulfilled') {
+        if (!googleQuery && googleResponse.status === 'fulfilled') {
           selectedGoogleResults = googleResponse.value;
           googleError = '';
-        } else {
+          if (selectedGoogleResults.length > 0) {
+            googleQuery = query;
+          }
+        } else if (googleResponse.status === 'rejected') {
           googleError = 'Google Books 결과를 불러오지 못했습니다.';
         }
 
-        if (worksheetResponse.status === 'fulfilled') {
+        if (!worksheetQuery && worksheetResponse.status === 'fulfilled') {
           selectedWorksheetResults = worksheetResponse.value;
+          fallbackWorksheetResults = worksheetResponse.value;
           worksheetError = '';
-        } else {
+          if ((selectedWorksheetResults?.resultCount ?? 0) > 0) {
+            worksheetQuery = query;
+          }
+        } else if (worksheetResponse.status === 'rejected') {
           worksheetError = 'WorksheetMaker 결과를 불러오지 못했습니다.';
         }
 
-        if (selectedGoogleResults.length > 0 || (selectedWorksheetResults?.resultCount ?? 0) > 0) {
+        if (googleQuery && worksheetQuery) {
           break;
         }
       }
+
+      selectedQuery = googleQuery || worksheetQuery || selectedQuery;
+      selectedWorksheetResults = selectedWorksheetResults ?? fallbackWorksheetResults;
 
       updateResult(item.id, (result) => ({
         ...result,
         status: googleError && worksheetError ? 'error' : 'done',
         query: selectedQuery,
+        googleQuery,
+        worksheetQuery,
         googleResults: selectedGoogleResults,
         googleError,
         worksheetResults: selectedWorksheetResults,
@@ -1052,8 +1118,8 @@ function BatchFinderApp() {
 
           {results.length > 0 && (
             <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-              <div className="grid grid-cols-[220px_minmax(320px,1.2fr)_minmax(320px,1fr)_minmax(360px,1.1fr)] border-b border-slate-200 bg-slate-50 text-xs font-semibold uppercase tracking-wider text-slate-500 max-xl:hidden">
-                <div className="px-4 py-3">지문번호</div>
+              <div className="grid grid-cols-[110px_minmax(360px,1.2fr)_minmax(420px,1fr)_minmax(360px,1.1fr)] border-b border-slate-200 bg-slate-50 text-center text-xs font-semibold uppercase tracking-wider text-slate-500 max-xl:hidden">
+                <div className="px-3 py-3">지문번호</div>
                 <div className="border-l border-slate-200 px-4 py-3">본문텍스트 / 검색 문구</div>
                 <div className="border-l border-slate-200 px-4 py-3">Google Books</div>
                 <div className="border-l border-slate-200 px-4 py-3">WorksheetMaker</div>
@@ -1061,8 +1127,8 @@ function BatchFinderApp() {
 
               <div className="divide-y divide-slate-200">
                 {results.map((result) => (
-                  <article key={result.id} className="grid grid-cols-[220px_minmax(320px,1.2fr)_minmax(320px,1fr)_minmax(360px,1.1fr)] max-xl:block">
-                    <div className="px-4 py-4 max-xl:border-b max-xl:border-slate-100">
+                  <article key={result.id} className="grid grid-cols-[110px_minmax(360px,1.2fr)_minmax(420px,1fr)_minmax(360px,1.1fr)] max-xl:block">
+                    <div className="px-3 py-4 text-center max-xl:border-b max-xl:border-slate-100">
                       <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 xl:hidden">지문번호</p>
                       <p className="mt-1 break-words text-sm font-semibold leading-6 text-slate-800">{result.id}</p>
                       <p className="mt-3 inline-flex rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">
@@ -1073,11 +1139,23 @@ function BatchFinderApp() {
                     <div className="border-l border-slate-200 px-4 py-4 max-xl:border-l-0 max-xl:border-b max-xl:border-slate-100">
                       <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 xl:hidden">본문텍스트 / 검색 문구</p>
                       <div className="max-h-72 overflow-y-auto pr-1 text-sm leading-6 text-slate-700">
-                        {result.query ? highlightTextWithPatterns(result.text, [{ text: result.query, className: 'bg-amber-200/80' }]) : result.text}
+                        {result.query
+                          ? highlightTextWithPatterns(result.text, [
+                              { text: result.googleQuery || result.query, className: 'bg-amber-200/80' },
+                              { text: result.worksheetQuery, className: 'bg-sky-200/85 text-sky-950' },
+                            ])
+                          : result.text}
                       </div>
                       {result.query && (
-                        <div className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">
-                          검색 문구: <span className="font-semibold">{result.query}</span>
+                        <div className="mt-3 space-y-1 rounded-xl bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">
+                          <p>
+                            Google Books:{' '}
+                            <span className="font-semibold">{result.googleQuery || result.query}</span>
+                          </p>
+                          <p>
+                            WorksheetMaker:{' '}
+                            <span className="font-semibold">{result.worksheetQuery || result.query}</span>
+                          </p>
                         </div>
                       )}
                       {result.attempts.length > 1 && (
@@ -1099,7 +1177,7 @@ function BatchFinderApp() {
                       ) : result.googleError ? (
                         <p className="text-sm leading-6 text-rose-600">{result.googleError}</p>
                       ) : (
-                        <GoogleBooksMiniResult result={result.googleResults[0]} query={result.query} />
+                        <GoogleBooksMiniResult result={result.googleResults[0]} query={result.googleQuery || result.query} />
                       )}
                     </div>
 
@@ -1115,7 +1193,7 @@ function BatchFinderApp() {
                       ) : result.worksheetError ? (
                         <p className="text-sm leading-6 text-rose-600">{result.worksheetError}</p>
                       ) : (
-                        <WorksheetMakerMiniResult result={result.worksheetResults?.results[0]} query={result.query} />
+                        <WorksheetMakerMiniResult result={result.worksheetResults?.results[0]} query={result.worksheetQuery || result.query} />
                       )}
                     </div>
                   </article>
