@@ -11,9 +11,6 @@ export default async function handler(req, res) {
   }
 
   const apiKey = process.env.GOOGLE_BOOKS_API_KEY;
-  if (!apiKey) {
-    return res.status(500).json({ error: 'Vercel 환경변수 GOOGLE_BOOKS_API_KEY가 설정되지 않았습니다.' });
-  }
 
   try {
     const searchResponse = await requestGoogleBooks({
@@ -43,7 +40,7 @@ async function requestGoogleBooks({ query, apiKey, exactOnly = false }) {
   let exactResults = [];
 
   try {
-    exactResults = await requestGoogleBooksApi({
+    exactResults = await requestGoogleBooksApiWithPublicFallback({
       apiKey,
       searchQuery: `"${query}"`,
     });
@@ -71,7 +68,7 @@ async function requestGoogleBooks({ query, apiKey, exactOnly = false }) {
   let broadResults = [];
 
   try {
-    broadResults = await requestGoogleBooksApi({
+    broadResults = await requestGoogleBooksApiWithPublicFallback({
       apiKey,
       searchQuery: query,
     });
@@ -88,16 +85,49 @@ async function requestGoogleBooks({ query, apiKey, exactOnly = false }) {
   };
 }
 
+async function requestGoogleBooksApiWithPublicFallback({ searchQuery, apiKey }) {
+  let primaryError = null;
+
+  if (apiKey) {
+    try {
+      const keyedResults = await requestGoogleBooksApi({
+        apiKey,
+        searchQuery,
+      });
+
+      if (keyedResults.length > 0) {
+        return keyedResults;
+      }
+    } catch (error) {
+      primaryError = error;
+    }
+  }
+
+  try {
+    return await requestGoogleBooksApi({
+      searchQuery,
+    });
+  } catch (error) {
+    if (primaryError) {
+      throw primaryError;
+    }
+    throw error;
+  }
+}
+
 async function requestGoogleBooksApi({ searchQuery, apiKey }) {
-  const url =
-    'https://www.googleapis.com/books/v1/volumes?' +
-    new URLSearchParams({
-      q: searchQuery,
-      maxResults: '5',
-      langRestrict: 'en',
-      printType: 'books',
-      key: apiKey,
-    }).toString();
+  const params = new URLSearchParams({
+    q: searchQuery,
+    maxResults: '5',
+    langRestrict: 'en',
+    printType: 'books',
+  });
+
+  if (apiKey) {
+    params.set('key', apiKey);
+  }
+
+  const url = `https://www.googleapis.com/books/v1/volumes?${params.toString()}`;
 
   const response = await fetch(url, {
     headers: {
