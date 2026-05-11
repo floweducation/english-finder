@@ -2331,18 +2331,14 @@ function SingleFinderApp() {
 
       <footer className="mx-auto mt-12 max-w-6xl border-t border-slate-200 px-6 py-12 text-center text-sm text-slate-400">
         {visitorStats && (
-          <section className="mx-auto mb-10 w-full max-w-xs text-left text-slate-500">
-            <p className="text-lg font-medium text-slate-700">Total</p>
-            <p className="mt-2 text-4xl font-semibold tracking-normal text-slate-800">
-              {visitorStatsFormatter.format(visitorStats.total)}
-            </p>
-            <div className="mt-5 space-y-2 text-lg text-slate-400">
-              <p>Today : {visitorStatsFormatter.format(visitorStats.today)}</p>
-              <p>Yesterday : {visitorStatsFormatter.format(visitorStats.yesterday)}</p>
-            </div>
-            <p className="mt-8 text-right text-sm text-slate-400">
-              {formatVisitorStatsTimestamp(visitorStats.updatedAt, visitorStats.timezone)}
-            </p>
+          <section className="mb-4 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-xs text-slate-400">
+            <span>Total {visitorStatsFormatter.format(visitorStats.total)}</span>
+            <span aria-hidden="true">·</span>
+            <span>Today {visitorStatsFormatter.format(visitorStats.today)}</span>
+            <span aria-hidden="true">·</span>
+            <span>Yesterday {visitorStatsFormatter.format(visitorStats.yesterday)}</span>
+            <span aria-hidden="true">·</span>
+            <span>{formatVisitorStatsTimestamp(visitorStats.updatedAt, visitorStats.timezone)}</span>
           </section>
         )}
         <p>
