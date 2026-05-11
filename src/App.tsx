@@ -795,16 +795,34 @@ async function fetchGoogleBooks(query: string, options: { exactOnly?: boolean } 
 
   if (!response.ok) {
     const errorPayload = await response.json().catch(() => null);
-    throw new GoogleBooksApiError(
+    const apiError = new GoogleBooksApiError(
       errorPayload?.error ?? `Google Books request failed with ${response.status}`,
       response.status,
       errorPayload?.code ?? '',
     );
+
+    if (response.status === 429 || errorPayload?.code === 'google-books-quota-exceeded') {
+      const publicResults = await fetchPublicGoogleBooks(query, options);
+      if (publicResults.length > 0) {
+        return publicResults;
+      }
+    }
+
+    throw apiError;
   }
 
   const data = await response.json();
+  const serverResults = (data.results ?? []).map(mapGoogleBookResult);
 
-  return (data.results ?? []).map((item: any) => ({
+  if (serverResults.length > 0) {
+    return serverResults;
+  }
+
+  return fetchPublicGoogleBooks(query, options);
+}
+
+function mapGoogleBookResult(item: any): GoogleBookResult {
+  return {
     id: item.id,
     title: item.title ?? '제목 없음',
     authors: item.authors ?? [],
@@ -817,7 +835,56 @@ async function fetchGoogleBooks(query: string, options: { exactOnly?: boolean } 
     accessViewStatus: item.accessViewStatus,
     webReaderLink: item.webReaderLink,
     previewAvailable: Boolean(item.previewAvailable),
-  }));
+  };
+}
+
+function mapPublicGoogleBookItem(item: any): GoogleBookResult {
+  const viewability = item.accessInfo?.viewability || 'UNKNOWN';
+  const accessViewStatus = item.accessInfo?.accessViewStatus || 'NONE';
+  const webReaderLink = item.accessInfo?.webReaderLink;
+  const publicDomain = Boolean(item.accessInfo?.publicDomain);
+  const previewLink = item.volumeInfo?.previewLink;
+  const previewAvailable =
+    accessViewStatus === 'FULL_PUBLIC_DOMAIN' ||
+    (publicDomain && viewability === 'ALL_PAGES' && Boolean(webReaderLink) && Boolean(previewLink));
+
+  return {
+    id: item.id,
+    title: item.volumeInfo?.title || '제목 없음',
+    authors: item.volumeInfo?.authors || [],
+    publishedDate: item.volumeInfo?.publishedDate,
+    thumbnail: item.volumeInfo?.imageLinks?.thumbnail,
+    previewLink,
+    infoLink: item.volumeInfo?.infoLink,
+    webReaderLink,
+    snippet: stripHtml(String(item.searchInfo?.textSnippet || '').trim()),
+    viewability,
+    accessViewStatus,
+    previewAvailable,
+  };
+}
+
+async function fetchPublicGoogleBooks(query: string, options: { exactOnly?: boolean } = {}): Promise<GoogleBookResult[]> {
+  const searchQuery = options.exactOnly ? `"${query}"` : query;
+  const publicParams = new URLSearchParams({
+    q: searchQuery,
+    maxResults: '5',
+    langRestrict: 'en',
+    printType: 'books',
+    country: 'KR',
+  });
+
+  try {
+    const response = await fetch(`https://www.googleapis.com/books/v1/volumes?${publicParams.toString()}`);
+    if (!response.ok) {
+      return [];
+    }
+
+    const data = await response.json();
+    return (data.items ?? []).map(mapPublicGoogleBookItem);
+  } catch {
+    return [];
+  }
 }
 
 function isGoogleBooksQuotaExceeded(error: unknown) {
