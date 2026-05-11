@@ -33,10 +33,19 @@ export default async function handler(req, res) {
 }
 
 async function requestGoogleBooks({ query, apiKey }) {
-  const exactResults = await requestGoogleBooksApi({
-    apiKey,
-    searchQuery: `"${query}"`,
-  });
+  let exactResults = [];
+
+  try {
+    exactResults = await requestGoogleBooksApi({
+      apiKey,
+      searchQuery: `"${query}"`,
+    });
+  } catch (error) {
+    if (!isRecoverableGoogleBooksError(error)) {
+      throw error;
+    }
+    exactResults = [];
+  }
 
   if (exactResults.length > 0) {
     return {
@@ -112,4 +121,9 @@ async function requestGoogleBooksApi({ searchQuery, apiKey }) {
       previewAvailable,
     };
   });
+}
+
+function isRecoverableGoogleBooksError(error) {
+  const message = error instanceof Error ? error.message.toLowerCase() : '';
+  return message.includes('temporarily unavailable') || message.includes('backend error') || message.includes('internal error');
 }
