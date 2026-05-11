@@ -114,6 +114,7 @@ const FLOW_LLM_MODE = 'flow-llm';
 const ALL_MODE = 'all';
 const MAX_GOOGLE_BATCH_QUERY_ATTEMPTS = 10;
 const MAX_WORKSHEET_BATCH_QUERY_ATTEMPTS = 4;
+const GOOGLE_BATCH_RETRY_DELAY_MS = 8000;
 const BATCH_GOOGLE_QUERY_MIN_WORDS = 10;
 const BATCH_GOOGLE_QUERY_MAX_WORDS = 12;
 const BATCH_WORKSHEET_QUERY_MIN_WORDS = 6;
@@ -597,6 +598,12 @@ function downloadHtmlFile(filename: string, html: string) {
   URL.revokeObjectURL(url);
 }
 
+function wait(ms: number) {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+}
+
 function buildComparisonPromptTemplate() {
   return [
     '다음 형식으로 출력해줘.',
@@ -783,6 +790,16 @@ async function fetchGoogleBooks(query: string): Promise<GoogleBookResult[]> {
     webReaderLink: item.webReaderLink,
     previewAvailable: Boolean(item.previewAvailable),
   }));
+}
+
+async function fetchGoogleBooksWithBatchRetry(query: string, onRetry?: (delayMs: number) => void) {
+  try {
+    return await fetchGoogleBooks(query);
+  } catch {
+    onRetry?.(GOOGLE_BATCH_RETRY_DELAY_MS);
+    await wait(GOOGLE_BATCH_RETRY_DELAY_MS);
+    return fetchGoogleBooks(query);
+  }
 }
 
 async function fetchWorksheetMaker(query: string): Promise<WorksheetSearchResponse> {
@@ -1489,15 +1506,18 @@ function WorksheetMakerMiniResult({ result, query }: { result?: WorksheetResult;
   );
 }
 
-async function findBatchGoogleResult(attempts: string[], sourceText: string) {
-  let googleError = '';
-  let hadSuccessfulRequest = false;
-
+async function findBatchGoogleResult(
+  attempts: string[],
+  sourceText: string,
+  onRetry?: (query: string, delayMs: number) => void,
+) {
   for (const query of attempts) {
     try {
-      const googleResults = getReliableGoogleResults(await fetchGoogleBooks(query), sourceText, query);
-      hadSuccessfulRequest = true;
-      googleError = '';
+      const googleResults = getReliableGoogleResults(
+        await fetchGoogleBooksWithBatchRetry(query, (delayMs) => onRetry?.(query, delayMs)),
+        sourceText,
+        query,
+      );
 
       if (googleResults.length > 0) {
         return {
@@ -1507,14 +1527,18 @@ async function findBatchGoogleResult(attempts: string[], sourceText: string) {
         };
       }
     } catch {
-      googleError = 'Google Books 결과를 불러오지 못했습니다.';
+      return {
+        query,
+        results: [] as GoogleBookResult[],
+        error: 'Google Books 결과를 불러오지 못했습니다. 잠시 후 다시 일괄검색을 실행해 주세요.',
+      };
     }
   }
 
   return {
     query: '',
     results: [] as GoogleBookResult[],
-    error: hadSuccessfulRequest ? '' : googleError,
+    error: '',
   };
 }
 
@@ -1593,10 +1617,17 @@ function BatchFinderApp() {
         attempts,
         googleAttempts,
         worksheetAttempts,
+        googleError: '',
+        worksheetError: '',
       }));
 
       const [googleSearch, worksheetSearch] = await Promise.all([
-        findBatchGoogleResult(googleAttempts, item.text),
+        findBatchGoogleResult(googleAttempts, item.text, (query, delayMs) => {
+          updateResult(item.id, (result) => ({
+            ...result,
+            googleError: `Google Books 요청이 일시적으로 실패해 ${Math.round(delayMs / 1000)}초 후 다시 시도합니다: ${query}`,
+          }));
+        }),
         findBatchWorksheetResult(worksheetAttempts),
       ]);
       const selectedQuery = googleSearch.query || worksheetSearch.query || googleAttempts[0] || worksheetAttempts[0] || '';
@@ -1764,7 +1795,7 @@ function BatchFinderApp() {
                     <div className="border-l border-slate-200 px-4 py-4 max-xl:border-l-0 max-xl:border-b max-xl:border-slate-100">
                       <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 xl:hidden">Google Books</p>
                       {result.status === 'searching' ? (
-                        <p className="inline-flex items-center gap-2 text-sm text-slate-500"><LoaderCircle size={14} className="animate-spin" /> 검색 중</p>
+                        <p className="inline-flex items-center gap-2 text-sm leading-6 text-slate-500"><LoaderCircle size={14} className="animate-spin" /> {result.googleError || '검색 중'}</p>
                       ) : result.googleError ? (
                         <p className="text-sm leading-6 text-rose-600">{result.googleError}</p>
                       ) : (
