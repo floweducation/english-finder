@@ -16,7 +16,11 @@ export default async function handler(req, res) {
   }
 
   try {
-    const searchResponse = await requestGoogleBooks({ query, apiKey });
+    const searchResponse = await requestGoogleBooks({
+      query,
+      apiKey,
+      exactOnly: req.query.mode === 'exact' || req.query.exact === '1',
+    });
 
     res.setHeader('Cache-Control', 's-maxage=3600, stale-while-revalidate=86400');
     return res.status(200).json({
@@ -26,13 +30,16 @@ export default async function handler(req, res) {
       results: searchResponse.results,
     });
   } catch (error) {
-    return res.status(500).json({
+    const quotaExceeded = isGoogleBooksQuotaError(error);
+
+    return res.status(quotaExceeded ? 429 : 500).json({
       error: error instanceof Error ? error.message : 'Google Books 검색 중 오류가 발생했습니다.',
+      code: quotaExceeded ? 'google-books-quota-exceeded' : 'google-books-error',
     });
   }
 }
 
-async function requestGoogleBooks({ query, apiKey }) {
+async function requestGoogleBooks({ query, apiKey, exactOnly = false }) {
   let exactResults = [];
 
   try {
@@ -54,6 +61,13 @@ async function requestGoogleBooks({ query, apiKey }) {
     };
   }
 
+  if (exactOnly) {
+    return {
+      searchMode: 'exact',
+      results: [],
+    };
+  }
+
   let broadResults = [];
 
   try {
@@ -61,7 +75,10 @@ async function requestGoogleBooks({ query, apiKey }) {
       apiKey,
       searchQuery: query,
     });
-  } catch {
+  } catch (error) {
+    if (!isRecoverableGoogleBooksError(error)) {
+      throw error;
+    }
     broadResults = [];
   }
 
@@ -126,4 +143,9 @@ async function requestGoogleBooksApi({ searchQuery, apiKey }) {
 function isRecoverableGoogleBooksError(error) {
   const message = error instanceof Error ? error.message.toLowerCase() : '';
   return message.includes('temporarily unavailable') || message.includes('backend error') || message.includes('internal error');
+}
+
+function isGoogleBooksQuotaError(error) {
+  const message = error instanceof Error ? error.message.toLowerCase() : '';
+  return message.includes('quota exceeded') || message.includes('rate limit') || message.includes('resource_exhausted');
 }

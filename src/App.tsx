@@ -83,6 +83,18 @@ type VisitorStats = {
   updatedAt: string;
 };
 
+class GoogleBooksApiError extends Error {
+  status: number;
+  code: string;
+
+  constructor(message: string, status: number, code = '') {
+    super(message);
+    this.name = 'GoogleBooksApiError';
+    this.status = status;
+    this.code = code;
+  }
+}
+
 type BatchInputItem = {
   id: string;
   text: string;
@@ -766,12 +778,25 @@ function buildLlmInputPackage({
   ].join('\n');
 }
 
-async function fetchGoogleBooks(query: string): Promise<GoogleBookResult[]> {
-  const response = await fetch(`/api/google-books-search?q=${encodeURIComponent(query)}&v=2`);
+async function fetchGoogleBooks(query: string, options: { exactOnly?: boolean } = {}): Promise<GoogleBookResult[]> {
+  const params = new URLSearchParams({
+    q: query,
+    v: '2',
+  });
+
+  if (options.exactOnly) {
+    params.set('mode', 'exact');
+  }
+
+  const response = await fetch(`/api/google-books-search?${params.toString()}`);
 
   if (!response.ok) {
     const errorPayload = await response.json().catch(() => null);
-    throw new Error(errorPayload?.error ?? `Google Books request failed with ${response.status}`);
+    throw new GoogleBooksApiError(
+      errorPayload?.error ?? `Google Books request failed with ${response.status}`,
+      response.status,
+      errorPayload?.code ?? '',
+    );
   }
 
   const data = await response.json();
@@ -792,13 +817,26 @@ async function fetchGoogleBooks(query: string): Promise<GoogleBookResult[]> {
   }));
 }
 
+function isGoogleBooksQuotaExceeded(error: unknown) {
+  const message = error instanceof Error ? error.message.toLowerCase() : '';
+
+  return (
+    error instanceof GoogleBooksApiError &&
+    (error.status === 429 || error.code === 'google-books-quota-exceeded' || message.includes('quota exceeded'))
+  );
+}
+
 async function fetchGoogleBooksWithBatchRetry(query: string, onRetry?: (delayMs: number) => void) {
   try {
-    return await fetchGoogleBooks(query);
-  } catch {
+    return await fetchGoogleBooks(query, { exactOnly: true });
+  } catch (error) {
+    if (isGoogleBooksQuotaExceeded(error)) {
+      throw error;
+    }
+
     onRetry?.(GOOGLE_BATCH_RETRY_DELAY_MS);
     await wait(GOOGLE_BATCH_RETRY_DELAY_MS);
-    return fetchGoogleBooks(query);
+    return fetchGoogleBooks(query, { exactOnly: true });
   }
 }
 
@@ -1526,7 +1564,16 @@ async function findBatchGoogleResult(
           error: '',
         };
       }
-    } catch {
+    } catch (error) {
+      if (isGoogleBooksQuotaExceeded(error)) {
+        return {
+          query,
+          results: [] as GoogleBookResult[],
+          error: 'Google Books API 일일 한도를 초과했습니다. 한도 리셋 후 다시 시도하거나 Google Books 원본 검색 버튼으로 직접 확인해 주세요.',
+          quotaExceeded: true,
+        };
+      }
+
       return {
         query,
         results: [] as GoogleBookResult[],
@@ -1607,6 +1654,8 @@ function BatchFinderApp() {
     setIsSearching(true);
     setResults(parsedItems.map(createEmptyBatchResult));
 
+    let googleQuotaExceeded = false;
+
     for (const item of parsedItems) {
       const { googleAttempts, worksheetAttempts, attempts } = extractBatchSearchQueries(item.text);
 
@@ -1622,14 +1671,26 @@ function BatchFinderApp() {
       }));
 
       const [googleSearch, worksheetSearch] = await Promise.all([
-        findBatchGoogleResult(googleAttempts, item.text, (query, delayMs) => {
-          updateResult(item.id, (result) => ({
-            ...result,
-            googleError: `Google Books 요청이 일시적으로 실패해 ${Math.round(delayMs / 1000)}초 후 다시 시도합니다: ${query}`,
-          }));
-        }),
+        googleQuotaExceeded
+          ? Promise.resolve({
+              query: '',
+              results: [] as GoogleBookResult[],
+              error: 'Google Books API 일일 한도를 초과해 이번 일괄검색의 남은 Google Books 자동 검색을 건너뜁니다.',
+              quotaExceeded: true,
+            })
+          : findBatchGoogleResult(googleAttempts, item.text, (query, delayMs) => {
+              updateResult(item.id, (result) => ({
+                ...result,
+                googleError: `Google Books 요청이 일시적으로 실패해 ${Math.round(delayMs / 1000)}초 후 다시 시도합니다: ${query}`,
+              }));
+            }),
         findBatchWorksheetResult(worksheetAttempts),
       ]);
+
+      if (googleSearch.quotaExceeded) {
+        googleQuotaExceeded = true;
+      }
+
       const selectedQuery = googleSearch.query || worksheetSearch.query || googleAttempts[0] || worksheetAttempts[0] || '';
 
       updateResult(item.id, (result) => ({
@@ -1975,7 +2036,9 @@ function SingleFinderApp() {
       })
       .catch((error) => {
         console.error(error);
-        nextGoogleError = 'Google Books 결과를 불러오지 못했습니다.';
+        nextGoogleError = isGoogleBooksQuotaExceeded(error)
+          ? 'Google Books API 일일 한도를 초과했습니다. 한도 리셋 후 다시 시도하거나 Google Books 원본 검색 버튼으로 직접 확인해 주세요.'
+          : 'Google Books 결과를 불러오지 못했습니다.';
       });
 
     let worksheetTask: Promise<void>;
@@ -2010,6 +2073,10 @@ function SingleFinderApp() {
           }
         } catch (error) {
           console.error(error);
+          if (isGoogleBooksQuotaExceeded(error)) {
+            nextGoogleError = 'Google Books API 일일 한도를 초과했습니다. 한도 리셋 후 다시 시도하거나 Google Books 원본 검색 버튼으로 직접 확인해 주세요.';
+            break;
+          }
         }
       }
     }
