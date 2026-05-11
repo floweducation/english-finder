@@ -546,21 +546,12 @@ function buildTistoryGoogleBookHtml(result: BatchSearchResult) {
 }
 
 function buildTistoryExportHtml(results: BatchSearchResult[]) {
-  const exportedAt = new Date().toLocaleString('ko-KR', {
-    timeZone: VISITOR_COUNTER_TIME_ZONE,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-
   const cards = results
     .map((result) => {
       const query = getBatchGoogleDisplayQuery(result);
 
       return [
-        '<article style="box-sizing:border-box;margin:0 0 22px;padding:22px;border:1px solid #dbe3ef;border-radius:16px;background:#ffffff;">',
+        '<article style="box-sizing:border-box;width:100%;margin:0 0 22px;padding:18px 14px;border:2px solid #94a3b8;border-radius:16px;background:#ffffff;">',
         `<h3 style="margin:0 0 18px;color:#1e293b;font-size:19px;line-height:1.45;font-weight:800;">${escapeHtml(result.id)}</h3>`,
         '<div style="margin:0 0 18px;">',
         '<p style="margin:0 0 8px;color:#64748b;font-size:13px;font-weight:800;letter-spacing:.04em;">본문 지문</p>',
@@ -586,9 +577,8 @@ function buildTistoryExportHtml(results: BatchSearchResult[]) {
     .join('\n');
 
   return [
-    '<div style="box-sizing:border-box;max-width:760px;margin:0 auto;color:#334155;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Apple SD Gothic Neo,Noto Sans KR,Malgun Gothic,sans-serif;">',
-    '<h2 style="margin:0 0 8px;color:#111827;font-size:24px;line-height:1.35;font-weight:900;">English Finder 일괄검색 결과</h2>',
-    `<p style="margin:0 0 18px;color:#94a3b8;font-size:13px;line-height:1.6;">생성 시각: ${escapeHtml(exportedAt)}</p>`,
+    '<div style="box-sizing:border-box;width:100%;max-width:100%;margin:0;padding:0;color:#334155;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Apple SD Gothic Neo,Noto Sans KR,Malgun Gothic,sans-serif;">',
+    '<h2 style="margin:0 0 16px;color:#111827;font-size:24px;line-height:1.35;font-weight:900;">English Finder 일괄검색 결과</h2>',
     cards || '<p style="margin:0;color:#64748b;font-size:14px;line-height:1.7;">내보낼 결과가 없습니다.</p>',
     '</div>',
   ].join('\n');
