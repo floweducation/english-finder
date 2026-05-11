@@ -504,17 +504,19 @@ function buildTistoryGoogleBookHtml(result: BatchSearchResult) {
   const book = result.googleResults[0];
 
   if (result.status === 'searching') {
-    return '<p style="margin:0;color:#64748b;font-size:14px;line-height:1.7;">Google Books 검색 중입니다.</p>';
+    return '<div style="box-sizing:border-box;border:1px solid #e2e8f0;border-radius:14px;background:#f8fafc;padding:14px 16px;"><p style="margin:0;color:#64748b;font-size:14px;line-height:1.7;">Google Books 검색 중입니다.</p></div>';
   }
 
   if (result.googleError) {
-    return `<p style="margin:0;color:#e11d48;font-size:14px;line-height:1.7;">${escapeHtml(result.googleError)}</p>`;
+    return `<div style="box-sizing:border-box;border:1px solid #fecdd3;border-radius:14px;background:#fff1f2;padding:14px 16px;"><p style="margin:0;color:#e11d48;font-size:14px;line-height:1.7;">${escapeHtml(result.googleError)}</p></div>`;
   }
 
   if (!book) {
     return [
-      '<p style="margin:0 0 10px;color:#64748b;font-size:14px;line-height:1.7;">Google Books 후보가 없습니다.</p>',
+      '<div style="box-sizing:border-box;border:1px solid #e2e8f0;border-radius:14px;background:#f8fafc;padding:14px 16px;">',
+      '<p style="margin:0 0 12px;color:#64748b;font-size:14px;line-height:1.7;">Google Books 후보가 없습니다.</p>',
       `<a href="${escapeHtml(googleSearchUrl)}" target="_blank" rel="noopener noreferrer" style="display:inline-block;border-radius:999px;background:#eef2ff;color:#4338ca;text-decoration:none;font-size:13px;font-weight:700;padding:7px 12px;">Google Books 원본 검색</a>`,
+      '</div>',
     ].join('\n');
   }
 
@@ -524,17 +526,17 @@ function buildTistoryGoogleBookHtml(result: BatchSearchResult) {
   const authorLine = [formatAuthors(book.authors), book.publishedDate].filter(Boolean).join(' · ');
 
   return [
-    '<div style="overflow:hidden;">',
+    '<div style="box-sizing:border-box;overflow:hidden;border:1px solid #dbe3ef;border-radius:14px;background:#f8fafc;padding:14px 16px;">',
     book.thumbnail
-      ? `<img src="${escapeHtml(book.thumbnail)}" alt="${escapeHtml(book.title)}" style="float:left;width:72px;height:108px;object-fit:cover;border-radius:10px;background:#f1f5f9;margin:0 14px 10px 0;" />`
+      ? `<img src="${escapeHtml(book.thumbnail)}" alt="${escapeHtml(book.title)}" style="float:left;width:72px;height:108px;object-fit:cover;border-radius:10px;background:#f1f5f9;margin:0 16px 12px 0;" />`
       : '',
-    `<p style="margin:0 0 6px;color:#1e293b;font-size:18px;line-height:1.45;font-weight:800;">${escapeHtml(book.title)}</p>`,
-    `<p style="margin:0 0 10px;color:#64748b;font-size:14px;line-height:1.6;">${escapeHtml(authorLine)}</p>`,
+    `<p style="margin:0 0 7px;color:#1e293b;font-size:18px;line-height:1.45;font-weight:800;">${escapeHtml(book.title)}</p>`,
+    `<p style="margin:0 0 12px;color:#64748b;font-size:14px;line-height:1.6;">${escapeHtml(authorLine)}</p>`,
     book.snippet
-      ? `<p style="margin:0 0 12px;color:#475569;font-size:14px;line-height:1.75;">${highlightHtml(book.snippet, query, 'background:#fde68a;color:inherit;border-radius:4px;padding:0 2px;')}</p>`
+      ? `<p style="margin:0 0 14px;color:#475569;font-size:14px;line-height:1.75;">${highlightHtml(book.snippet, query, 'background:#fde68a;color:inherit;border-radius:4px;padding:0 2px;')}</p>`
       : '',
-    `<p style="clear:both;margin:0 0 12px;border-radius:12px;background:${reviewBg};color:${reviewColor};font-size:13px;line-height:1.65;padding:10px 12px;"><strong>${escapeHtml(review.label)}</strong><br />${escapeHtml(review.message)}</p>`,
-    '<p style="margin:0;">',
+    `<p style="clear:both;margin:0 0 14px;border-radius:12px;background:${reviewBg};color:${reviewColor};font-size:13px;line-height:1.65;padding:11px 13px;"><strong>${escapeHtml(review.label)}</strong><br />${escapeHtml(review.message)}</p>`,
+    '<p style="margin:0;padding-top:2px;">',
     `<a href="${escapeHtml(googleSearchUrl)}" target="_blank" rel="noopener noreferrer" style="display:inline-block;margin:0 6px 6px 0;border-radius:999px;background:#eef2ff;color:#4338ca;text-decoration:none;font-size:13px;font-weight:700;padding:7px 12px;">Google Books 열기</a>`,
     `<a href="${escapeHtml(book.previewLink || googleSearchUrl)}" target="_blank" rel="noopener noreferrer" style="display:inline-block;margin:0 6px 6px 0;border-radius:999px;background:#f5f3ff;color:#6d28d9;text-decoration:none;font-size:13px;font-weight:700;padding:7px 12px;">미리보기</a>`,
     `<a href="${escapeHtml(book.infoLink || googleSearchUrl)}" target="_blank" rel="noopener noreferrer" style="display:inline-block;margin:0 0 6px 0;border-radius:999px;background:#f1f5f9;color:#334155;text-decoration:none;font-size:13px;font-weight:700;padding:7px 12px;">도서 정보</a>`,
@@ -558,17 +560,24 @@ function buildTistoryExportHtml(results: BatchSearchResult[]) {
       const query = getBatchGoogleDisplayQuery(result);
 
       return [
-        '<article style="box-sizing:border-box;margin:0 0 18px;padding:18px;border:1px solid #dbe3ef;border-radius:16px;background:#ffffff;">',
-        `<h3 style="margin:0 0 14px;color:#1e293b;font-size:19px;line-height:1.45;font-weight:800;">${escapeHtml(result.id)}</h3>`,
-        '<div style="margin:0 0 16px;">',
-        '<p style="margin:0 0 6px;color:#64748b;font-size:13px;font-weight:800;letter-spacing:.04em;">본문텍스트 / 검색 문구</p>',
-        `<p style="margin:0;color:#334155;font-size:14px;line-height:1.8;">${highlightHtml(result.text, query, 'background:#fde68a;color:inherit;border-radius:4px;padding:0 2px;')}</p>`,
+        '<article style="box-sizing:border-box;margin:0 0 22px;padding:22px;border:1px solid #dbe3ef;border-radius:16px;background:#ffffff;">',
+        `<h3 style="margin:0 0 18px;color:#1e293b;font-size:19px;line-height:1.45;font-weight:800;">${escapeHtml(result.id)}</h3>`,
+        '<div style="margin:0 0 18px;">',
+        '<p style="margin:0 0 8px;color:#64748b;font-size:13px;font-weight:800;letter-spacing:.04em;">본문 지문</p>',
+        '<div style="box-sizing:border-box;border:1px solid #e2e8f0;border-radius:14px;background:#f8fafc;padding:15px 17px;">',
+        `<p style="margin:0;color:#334155;font-size:14px;line-height:1.85;">${highlightHtml(result.text, query, 'background:#fde68a;color:inherit;border-radius:4px;padding:0 2px;')}</p>`,
+        '</div>',
         query
-          ? `<p style="margin:10px 0 0;border-radius:12px;background:#fffbeb;color:#92400e;font-size:13px;line-height:1.65;padding:9px 11px;">Google Books 검색 문구: <strong>${escapeHtml(query)}</strong></p>`
+          ? [
+              '<div style="margin:16px 0 0;padding:14px 0 0;border-top:1px solid #e2e8f0;">',
+              '<p style="margin:0 0 7px;color:#94a3b8;font-size:12px;font-weight:800;letter-spacing:.04em;">Google Books 검색 문구</p>',
+              `<p style="margin:0;border-radius:12px;background:#fffbeb;color:#92400e;font-size:13px;line-height:1.7;padding:10px 12px;"><strong>${escapeHtml(query)}</strong></p>`,
+              '</div>',
+            ].join('\n')
           : '',
         '</div>',
-        '<div>',
-        '<p style="margin:0 0 8px;color:#64748b;font-size:13px;font-weight:800;letter-spacing:.04em;">Google Books</p>',
+        '<div style="margin:18px 0 0;padding:18px 0 0;border-top:1px solid #e2e8f0;">',
+        '<p style="margin:0 0 10px;color:#64748b;font-size:13px;font-weight:800;letter-spacing:.04em;">Google Books</p>',
         buildTistoryGoogleBookHtml(result),
         '</div>',
         '</article>',
