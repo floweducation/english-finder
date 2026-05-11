@@ -486,6 +486,9 @@ function escapeHtml(value?: string) {
     .replace(/'/g, '&#39;');
 }
 
+const TISTORY_INLINE_HIGHLIGHT_STYLE =
+  'display:inline!important;white-space:normal!important;line-height:inherit;vertical-align:baseline;box-decoration-break:clone;-webkit-box-decoration-break:clone;background:#fde68a;color:inherit;border-radius:4px;padding:0 2px;';
+
 function highlightHtml(text: string, query: string, style: string) {
   const cleanText = formatDisplayParagraph(text);
   const cleanQuery = sanitizeSearchQuery(query);
@@ -502,7 +505,7 @@ function highlightHtml(text: string, query: string, style: string) {
 
   cleanText.replace(regex, (match, offset: number) => {
     output += escapeHtml(cleanText.slice(lastIndex, offset));
-    output += `<mark style="${style}">${escapeHtml(match)}</mark>`;
+    output += `<span style="${style}">${escapeHtml(match)}</span>`;
     lastIndex = offset + match.length;
     return match;
   });
@@ -546,7 +549,7 @@ function buildTistoryGoogleBookHtml(result: BatchSearchResult) {
     `<p style="margin:0 0 7px;color:#1e293b;font-size:18px;line-height:1.45;font-weight:800;">${escapeHtml(book.title)}</p>`,
     `<p style="margin:0 0 12px;color:#64748b;font-size:14px;line-height:1.6;">${escapeHtml(authorLine)}</p>`,
     book.snippet
-      ? `<p style="margin:0 0 14px;color:#475569;font-size:14px;line-height:1.75;">${highlightHtml(book.snippet, query, 'background:#fde68a;color:inherit;border-radius:4px;padding:0 2px;')}</p>`
+      ? `<p style="margin:0 0 14px;color:#475569;font-size:14px;line-height:1.75;">${highlightHtml(book.snippet, query, TISTORY_INLINE_HIGHLIGHT_STYLE)}</p>`
       : '',
     `<p style="clear:both;margin:0 0 14px;border-radius:12px;background:${reviewBg};color:${reviewColor};font-size:13px;line-height:1.65;padding:11px 13px;"><strong>${escapeHtml(review.label)}</strong><br />${escapeHtml(review.message)}</p>`,
     '<p style="margin:0;padding-top:2px;">',
@@ -569,7 +572,7 @@ function buildTistoryExportHtml(results: BatchSearchResult[]) {
         '<div style="margin:0 0 18px;">',
         '<p style="margin:0 0 8px;color:#64748b;font-size:13px;font-weight:800;letter-spacing:.04em;">본문 지문</p>',
         '<div style="box-sizing:border-box;border:1px solid #e2e8f0;border-radius:14px;background:#f8fafc;padding:15px 17px;">',
-        `<p style="margin:0;color:#334155;font-size:14px;line-height:1.85;">${highlightHtml(result.text, query, 'background:#fde68a;color:inherit;border-radius:4px;padding:0 2px;')}</p>`,
+        `<p style="margin:0;color:#334155;font-size:14px;line-height:1.85;">${highlightHtml(result.text, query, TISTORY_INLINE_HIGHLIGHT_STYLE)}</p>`,
         '</div>',
         query
           ? [
