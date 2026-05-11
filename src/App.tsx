@@ -14,7 +14,6 @@ import {
   Info,
   LoaderCircle,
   Search,
-  Sparkles,
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { Analytics } from '@vercel/analytics/react';
@@ -1653,7 +1652,6 @@ function SingleFinderApp() {
   const [passage, setPassage] = useState('');
   const [copied, setCopied] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
-  const [isEnhancing, setIsEnhancing] = useState(false);
   const [lastQuery, setLastQuery] = useState('');
   const [googleQueryUsed, setGoogleQueryUsed] = useState('');
   const [googleResults, setGoogleResults] = useState<GoogleBookResult[]>([]);
@@ -1661,8 +1659,6 @@ function SingleFinderApp() {
   const [googleError, setGoogleError] = useState('');
   const [worksheetError, setWorksheetError] = useState('');
   const [worksheetNotice, setWorksheetNotice] = useState('');
-  const [enhancementMessage, setEnhancementMessage] = useState('');
-  const [enhancementAttempts, setEnhancementAttempts] = useState<string[]>([]);
   const [copiedFlowAction, setCopiedFlowAction] = useState('');
   const [visitorStats, setVisitorStats] = useState<VisitorStats | null>(null);
 
@@ -1743,101 +1739,78 @@ function SingleFinderApp() {
     setGoogleError('');
     setWorksheetError('');
     setWorksheetNotice('');
-    setEnhancementMessage('');
-    setEnhancementAttempts([]);
+
+    let nextGoogleResults: GoogleBookResult[] = [];
+    let nextGoogleQuery = normalizedPassage;
+    let nextWorksheetResults: WorksheetSearchResponse | null = null;
+    let nextGoogleError = '';
+    let nextWorksheetError = '';
+    let nextWorksheetNotice = '';
 
     const googleTask = fetchGoogleBooks(normalizedPassage)
       .then((results) => {
-        setGoogleResults(getReliableGoogleResults(results, normalizedPassage, normalizedPassage));
-        setGoogleQueryUsed(normalizedPassage);
+        nextGoogleResults = getReliableGoogleResults(results, normalizedPassage, normalizedPassage);
       })
       .catch((error) => {
         console.error(error);
-        setGoogleError('Google Books 결과를 불러오지 못했습니다.');
+        nextGoogleError = 'Google Books 결과를 불러오지 못했습니다.';
       });
 
     let worksheetTask: Promise<void>;
     if (worksheetWordCount < MIN_WORKSHEET_WORDS) {
-      setWorksheetNotice('WorksheetMaker 검색은 연속된 3단어 이상일 때만 실행됩니다.');
+      nextWorksheetNotice = 'WorksheetMaker 검색은 연속된 3단어 이상일 때만 실행됩니다.';
       worksheetTask = Promise.resolve();
     } else {
       worksheetTask = fetchWorksheetMaker(normalizedPassage)
-        .then((results) => setWorksheetResults(results))
+        .then((results) => {
+          nextWorksheetResults = results;
+        })
         .catch((error) => {
           console.error(error);
-          setWorksheetError('WorksheetMaker 결과를 불러오지 못했습니다.');
+          nextWorksheetError = 'WorksheetMaker 결과를 불러오지 못했습니다.';
         });
     }
 
     await Promise.allSettled([googleTask, worksheetTask]);
+
+    if (!nextGoogleError && nextGoogleResults.length === 0 && nextWorksheetResults?.results[0]?.passage) {
+      const worksheetPassage = nextWorksheetResults.results[0].passage;
+      const enhancementQueries = extractEnhancementQueries(worksheetPassage, normalizedPassage);
+
+      for (const query of enhancementQueries.slice(0, MAX_ENHANCEMENT_RETRIES)) {
+        try {
+          const results = getReliableGoogleResults(await fetchGoogleBooks(query), worksheetPassage, query);
+
+          if (results.length > 0) {
+            nextGoogleResults = results;
+            nextGoogleQuery = query;
+            break;
+          }
+        } catch (error) {
+          console.error(error);
+        }
+      }
+    }
+
+    setGoogleResults(nextGoogleResults);
+    setGoogleQueryUsed(nextGoogleQuery);
+    setWorksheetResults(nextWorksheetResults);
+    setGoogleError(nextGoogleError);
+    setWorksheetError(nextWorksheetError);
+    setWorksheetNotice(nextWorksheetNotice);
     setIsSearching(false);
   }, [normalizedPassage, worksheetWordCount]);
 
   useEffect(() => {
     const pendingQuery = initialUrlQueryRef.current;
 
-    if (!pendingQuery || normalizedPassage !== pendingQuery || isSearching || isEnhancing) {
+    if (!pendingQuery || normalizedPassage !== pendingQuery || isSearching) {
       return;
     }
 
     initialUrlQueryRef.current = '';
     void handleUnifiedSearch();
-  }, [handleUnifiedSearch, isEnhancing, isSearching, normalizedPassage]);
-
-  const handleAutoEnhance = useCallback(async () => {
-    if (
-      isSearching ||
-      isEnhancing ||
-      googleResults.length > 0 ||
-      !!googleError ||
-      (worksheetResults?.resultCount ?? 0) < 1 ||
-      !worksheetResults.results[0]?.passage
-    ) {
-      return;
-    }
-
-    const enhancementQueries = extractEnhancementQueries(worksheetResults.results[0].passage, lastQuery);
-
-    if (enhancementQueries.length === 0) {
-      setEnhancementMessage('자동 보강 검색에 사용할 특징 문구를 추출하지 못했습니다.');
-      setEnhancementAttempts([]);
-      return;
-    }
-
-    setIsEnhancing(true);
-    setEnhancementMessage('');
-    setEnhancementAttempts([]);
-
-    let foundResults: GoogleBookResult[] = [];
-    let matchedQuery = '';
-    const triedQueries: string[] = [];
-
-    for (const query of enhancementQueries.slice(0, MAX_ENHANCEMENT_RETRIES)) {
-      triedQueries.push(query);
-      setEnhancementAttempts([...triedQueries]);
-
-      try {
-        const results = getReliableGoogleResults(await fetchGoogleBooks(query), worksheetResults.results[0].passage, query);
-        if (results.length > 0) {
-          foundResults = results;
-          matchedQuery = query;
-          break;
-        }
-      } catch (error) {
-        console.error(error);
-      }
-    }
-
-    if (foundResults.length > 0 && matchedQuery) {
-      setGoogleResults(foundResults);
-      setGoogleQueryUsed(matchedQuery);
-      setEnhancementMessage('WorksheetMaker 1번 지문을 바탕으로 자동 보강 검색을 수행해 Google Books 후보를 찾았습니다.');
-    } else {
-      setEnhancementMessage(`자동 보강 검색 ${Math.min(enhancementQueries.length, MAX_ENHANCEMENT_RETRIES)}회 내에서는 Google Books 후보를 찾지 못했습니다.`);
-    }
-
-    setIsEnhancing(false);
-  }, [googleError, googleResults.length, isEnhancing, isSearching, lastQuery, worksheetResults]);
+  }, [handleUnifiedSearch, isSearching, normalizedPassage]);
 
   const handleCopy = useCallback(() => {
     if (!normalizedPassage) return;
@@ -1895,6 +1868,7 @@ function SingleFinderApp() {
   const displayedWorksheetResults = useMemo(() => worksheetResults?.results.slice(0, 1) ?? [], [worksheetResults]);
   const hasAnyResultsView = lastQuery || isSearching;
   const currentGoogleQuery = googleQueryUsed || lastQuery || normalizedPassage;
+  const googleReviewSourceText = currentGoogleQuery !== lastQuery ? firstWorksheetResult?.passage ?? lastQuery : lastQuery;
   const flowLlmHelperVisible = isFlowLlmMode && !!firstWorksheetResult?.passage;
   const worksheetHighlightPatterns = useMemo(() => {
     const patterns: HighlightPattern[] = [];
@@ -1914,14 +1888,6 @@ function SingleFinderApp() {
 
     return patterns;
   }, [currentGoogleQuery]);
-  const canShowEnhancementButton =
-    !isSearching &&
-    !isEnhancing &&
-    !googleError &&
-    !!lastQuery &&
-    googleResults.length === 0 &&
-    (worksheetResults?.resultCount ?? 0) >= 1 &&
-    !!worksheetResults.results[0]?.passage;
 
   return (
     <div className="min-h-screen bg-[#f8f9fa] text-slate-900 font-sans selection:bg-indigo-100">
@@ -2000,7 +1966,7 @@ function SingleFinderApp() {
               <div className="flex flex-col gap-3 lg:flex-row">
                 <button
                   onClick={handleUnifiedSearch}
-                  disabled={!normalizedPassage || isSearching || isEnhancing}
+                  disabled={!normalizedPassage || isSearching}
                   className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-indigo-600 px-5 py-4 font-semibold text-white shadow-lg shadow-indigo-200 transition-all active:scale-[0.99] disabled:cursor-not-allowed disabled:bg-slate-300"
                 >
                   {isSearching ? <LoaderCircle size={20} className="animate-spin" /> : <Search size={20} />}
@@ -2125,118 +2091,101 @@ function SingleFinderApp() {
 
                   {!googleError && <p className="text-xs text-slate-400">Google Books 데이터 제공</p>}
 
-                  {enhancementMessage && !googleError && (
-                    <div className="rounded-2xl border border-indigo-200 bg-indigo-50 p-4 text-sm text-indigo-700">
-                      <div className="flex items-start gap-2">
-                        <Sparkles size={16} className="mt-0.5 shrink-0" />
-                        <div className="space-y-2">
-                          <p>{enhancementMessage}</p>
-                          {enhancementAttempts.length > 0 && (
-                            <div>
-                              <p className="text-xs font-semibold uppercase tracking-wider text-indigo-500">시도한 검색 문구</p>
-                              <ul className="mt-1 space-y-1 text-xs text-indigo-600">
-                                {enhancementAttempts.map((attempt) => (
-                                  <li key={attempt}>• {attempt}</li>
-                                ))}
-                              </ul>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
                   {!googleError && !isSearching && googleResults.length === 0 && lastQuery && (
                     <div className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-5 text-sm text-slate-500">
                       <p>표시할 Google Books 후보가 없습니다. 새 탭 버튼으로 원래 검색 페이지를 바로 열어 확인해보세요.</p>
-
-                      {canShowEnhancementButton && (
-                        <div className="rounded-2xl border border-indigo-200 bg-white p-4">
-                          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                            <div>
-                              <p className="font-semibold text-slate-700">자동 보강 검색</p>
-                              <p className="mt-1 text-xs leading-5 text-slate-500">
-                                WorksheetMaker 1번 지문에서 더 짧고 특징적인 구간을 추출해 Google Books를 최대 {MAX_ENHANCEMENT_RETRIES}회 추가 검색합니다.
-                              </p>
-                            </div>
-                            <button
-                              onClick={handleAutoEnhance}
-                              disabled={isEnhancing}
-                              className="inline-flex items-center justify-center gap-2 rounded-full bg-indigo-600 px-4 py-2 text-xs font-semibold text-white transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-slate-300"
-                            >
-                              {isEnhancing ? <LoaderCircle size={14} className="animate-spin" /> : <Sparkles size={14} />}
-                              {isEnhancing ? '보강 검색 중...' : '자동 보강 검색'}
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {googleResults.length > 0 && currentGoogleQuery && currentGoogleQuery !== lastQuery && (
-                    <div className="rounded-2xl border border-sky-200 bg-sky-50 p-4 text-xs text-slate-600">
-                      현재 Google Books 결과는 자동 보강 검색 문구로 찾았습니다:{' '}
-                      <span className="font-semibold text-sky-700">{currentGoogleQuery}</span>
                     </div>
                   )}
 
                   <div className="space-y-4">
-                    {googleResults.map((result) => (
-                      <article key={result.id} className="rounded-2xl border border-slate-200 p-4">
-                        <div className="flex gap-4">
-                          <div className="flex h-28 w-20 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-slate-100">
-                            {result.thumbnail ? (
-                              <img
-                                src={result.thumbnail}
-                                alt={result.title}
-                                className="h-full w-full object-cover"
-                                referrerPolicy="no-referrer"
-                              />
-                            ) : (
-                              <BookOpen size={20} className="text-slate-400" />
-                            )}
-                          </div>
-                          <div className="min-w-0 flex-1 space-y-2">
-                            <div>
-                              <h4 className="line-clamp-2 text-base font-semibold text-slate-800">{highlightTextWithPatterns(result.title, googleHighlightPatterns)}</h4>
-                              <p className="mt-1 text-sm text-slate-500">
-                                {result.authors.length > 0 ? result.authors.join(', ') : '저자 정보 없음'}
-                                {result.publishedDate ? ` · ${result.publishedDate}` : ''}
-                              </p>
+                    {googleResults.map((result) => {
+                      const googleResultQuery = currentGoogleQuery || lastQuery;
+                      const review = assessGoogleBookMatch(result, googleReviewSourceText || lastQuery || normalizedPassage, googleResultQuery);
+                      const reviewStyles = getGoogleReviewStyles(review.level);
+
+                      return (
+                        <article key={result.id} className="rounded-2xl border border-slate-200 p-4">
+                          <div className="flex gap-4">
+                            <div className="flex h-28 w-20 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-slate-100">
+                              {result.thumbnail ? (
+                                <img
+                                  src={result.thumbnail}
+                                  alt={result.title}
+                                  className="h-full w-full object-cover"
+                                  referrerPolicy="no-referrer"
+                                />
+                              ) : (
+                                <BookOpen size={20} className="text-slate-400" />
+                              )}
                             </div>
-                            {result.snippet && (
-                              <p className="line-clamp-3 text-sm leading-relaxed text-slate-600">{highlightTextWithPatterns(result.snippet, googleHighlightPatterns)}</p>
-                            )}
-                            <div className="flex flex-wrap items-center gap-2 pt-1">
-                              <a
-                                href={buildGoogleBooksSearchUrl(currentGoogleQuery || lastQuery)}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="rounded-full bg-indigo-50 px-3 py-1.5 text-xs font-medium text-indigo-700 transition-colors hover:bg-indigo-100"
-                              >
-                                Google Books 열기
-                              </a>
-                              <a
-                                href={result.previewLink || buildGoogleBooksSearchUrl(currentGoogleQuery || lastQuery)}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="rounded-full bg-violet-50 px-3 py-1.5 text-xs font-medium text-violet-700 transition-colors hover:bg-violet-100"
-                              >
-                                미리보기
-                              </a>
-                              <a
-                                href={result.infoLink || buildGoogleBooksSearchUrl(currentGoogleQuery || lastQuery)}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="rounded-full bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-200"
-                              >
-                                도서 정보
-                              </a>
+                            <div className="min-w-0 flex-1 space-y-2">
+                              <div>
+                                <h4 className="line-clamp-2 text-base font-semibold text-slate-800">{highlightTextWithPatterns(result.title, googleHighlightPatterns)}</h4>
+                                <p className="mt-1 text-sm text-slate-500">
+                                  {result.authors.length > 0 ? result.authors.join(', ') : '저자 정보 없음'}
+                                  {result.publishedDate ? ` · ${result.publishedDate}` : ''}
+                                </p>
+                              </div>
+                              {result.snippet && (
+                                <p className="line-clamp-3 text-sm leading-relaxed text-slate-600">{highlightTextWithPatterns(result.snippet, googleHighlightPatterns)}</p>
+                              )}
+                              <div className={`space-y-2 rounded-2xl px-4 py-3 text-xs leading-5 ${reviewStyles.box}`}>
+                                <div className="flex items-start gap-2">
+                                  {review.level === 'match' ? (
+                                    <Check size={14} className={`mt-0.5 shrink-0 ${reviewStyles.icon}`} />
+                                  ) : (
+                                    <AlertCircle size={14} className={`mt-0.5 shrink-0 ${reviewStyles.icon}`} />
+                                  )}
+                                  <div>
+                                    <p className="font-semibold">{review.label}</p>
+                                    <p>{review.message}</p>
+                                  </div>
+                                </div>
+                                <details>
+                                  <summary className="cursor-pointer font-semibold">원문 / Google 스니펫 비교</summary>
+                                  <div className="mt-2 space-y-2">
+                                    <p>
+                                      <span className="font-semibold">입력 본문: </span>
+                                      {highlightTextWithPatterns(review.sourceContext, [{ text: googleResultQuery, className: 'bg-amber-200/80' }])}
+                                    </p>
+                                    <p>
+                                      <span className="font-semibold">Google: </span>
+                                      {highlightTextWithPatterns(review.googleContext, [{ text: googleResultQuery, className: 'bg-amber-200/80' }])}
+                                    </p>
+                                  </div>
+                                </details>
+                              </div>
+                              <div className="flex flex-wrap items-center gap-2 pt-1">
+                                <a
+                                  href={buildGoogleBooksSearchUrl(googleResultQuery)}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="rounded-full bg-indigo-50 px-3 py-1.5 text-xs font-medium text-indigo-700 transition-colors hover:bg-indigo-100"
+                                >
+                                  Google Books 열기
+                                </a>
+                                <a
+                                  href={result.previewLink || buildGoogleBooksSearchUrl(googleResultQuery)}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="rounded-full bg-violet-50 px-3 py-1.5 text-xs font-medium text-violet-700 transition-colors hover:bg-violet-100"
+                                >
+                                  미리보기
+                                </a>
+                                <a
+                                  href={result.infoLink || buildGoogleBooksSearchUrl(googleResultQuery)}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="rounded-full bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-200"
+                                >
+                                  도서 정보
+                                </a>
+                              </div>
                             </div>
                           </div>
-                        </div>
-                      </article>
-                    ))}
+                        </article>
+                      );
+                    })}
                   </div>
                 </div>
 
