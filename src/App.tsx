@@ -94,6 +94,8 @@ type BatchSearchResult = BatchInputItem & {
   googleQuery: string;
   worksheetQuery: string;
   attempts: string[];
+  googleAttempts: string[];
+  worksheetAttempts: string[];
   googleResults: GoogleBookResult[];
   googleError: string;
   worksheetResults: WorksheetSearchResponse | null;
@@ -110,7 +112,12 @@ const MIN_WORKSHEET_WORDS = 3;
 const MAX_ENHANCEMENT_RETRIES = 4;
 const FLOW_LLM_MODE = 'flow-llm';
 const ALL_MODE = 'all';
-const MAX_BATCH_QUERY_ATTEMPTS = 3;
+const MAX_GOOGLE_BATCH_QUERY_ATTEMPTS = 10;
+const MAX_WORKSHEET_BATCH_QUERY_ATTEMPTS = 4;
+const BATCH_GOOGLE_QUERY_MIN_WORDS = 10;
+const BATCH_GOOGLE_QUERY_MAX_WORDS = 12;
+const BATCH_WORKSHEET_QUERY_MIN_WORDS = 6;
+const BATCH_WORKSHEET_QUERY_MAX_WORDS = 7;
 const VISITOR_COUNTER_TIME_ZONE = 'Asia/Seoul';
 const VISITOR_COUNTER_STORAGE_PREFIX = 'english-finder:visitor-counted';
 
@@ -785,6 +792,147 @@ function uniqueSearchQueries(queries: string[]) {
   );
 }
 
+function getPureSearchWords(text: string) {
+  return (
+    normalizeQuotes(stripHtml(text))
+      .replace(/\b([A-Za-z]+)['’]s\b/g, '$1')
+      .match(/[A-Za-z0-9]+/g) ?? []
+  );
+}
+
+function scorePureSearchWindow(words: string[], start: number, totalWords: number) {
+  const uncommonWords = words.filter((word) => {
+    const lower = word.toLowerCase();
+    return !STOP_WORDS.has(lower) && lower.length >= 5;
+  });
+  const uniqueWords = new Set(words.map((word) => word.toLowerCase()));
+  const averageLength = words.reduce((sum, word) => sum + word.length, 0) / Math.max(words.length, 1);
+  const startsWithStopWord = STOP_WORDS.has(words[0]?.toLowerCase() ?? '');
+  const endsWithStopWord = STOP_WORDS.has(words[words.length - 1]?.toLowerCase() ?? '');
+  const edgePenalty = start === 0 || start + words.length === totalWords ? 0.35 : 0;
+
+  return uncommonWords.length * 3 + uniqueWords.size * 0.7 + averageLength - (startsWithStopWord ? 0.7 : 0) - (endsWithStopWord ? 0.7 : 0) - edgePenalty;
+}
+
+function extractPureWordSearchQueries(
+  text: string,
+  {
+    minWords,
+    maxWords,
+    limit,
+  }: {
+    minWords: number;
+    maxWords: number;
+    limit: number;
+  },
+) {
+  const normalizedText = stripHtml(text).replace(/\s+/g, ' ').trim();
+  const sentenceTexts = normalizedText
+    .split(/(?<=[.!?])\s+/)
+    .map((sentence) => sentence.trim())
+    .filter(Boolean);
+  const pools = sentenceTexts.length > 0 ? sentenceTexts : [normalizedText];
+
+  type Candidate = {
+    text: string;
+    tokens: string[];
+    score: number;
+  };
+
+  const candidates: Candidate[] = [];
+
+  pools.forEach((pool) => {
+    const words = getPureSearchWords(pool);
+
+    for (let windowSize = maxWords; windowSize >= minWords; windowSize -= 1) {
+      if (words.length < windowSize) continue;
+
+      for (let start = 0; start <= words.length - windowSize; start += 1) {
+        const windowWords = words.slice(start, start + windowSize);
+        const uncommonCount = windowWords.filter((word) => {
+          const lower = word.toLowerCase();
+          return !STOP_WORDS.has(lower) && lower.length >= 5;
+        }).length;
+
+        if (uncommonCount < 2) {
+          continue;
+        }
+
+        const textValue = normalizeExtractedSearchQuery(windowWords.join(' '));
+
+        if (!textValue) {
+          continue;
+        }
+
+        candidates.push({
+          text: textValue,
+          tokens: windowWords.map((word) => word.toLowerCase()),
+          score: scorePureSearchWindow(windowWords, start, words.length),
+        });
+      }
+    }
+  });
+
+  if (candidates.length === 0) {
+    const fallbackWords = getPureSearchWords(normalizedText);
+    const fallbackSize = Math.min(Math.max(minWords, 1), fallbackWords.length);
+    const fallback = normalizeExtractedSearchQuery(fallbackWords.slice(0, fallbackSize).join(' '));
+    return fallback ? [fallback] : [];
+  }
+
+  const deduped = Array.from(
+    new Map(
+      candidates
+        .sort((a, b) => b.score - a.score)
+        .map((candidate) => [candidate.text.toLowerCase(), candidate]),
+    ).values(),
+  );
+
+  const selected: Candidate[] = [];
+  const overlapRatio = (left: string[], right: string[]) => {
+    const rightSet = new Set(right);
+    const sharedCount = left.filter((token) => rightSet.has(token)).length;
+    return sharedCount / Math.max(Math.min(left.length, right.length), 1);
+  };
+
+  for (const candidate of deduped) {
+    const isTooSimilar = selected.some((picked) => {
+      if (picked.text.toLowerCase().includes(candidate.text.toLowerCase())) return true;
+      if (candidate.text.toLowerCase().includes(picked.text.toLowerCase())) return true;
+      return overlapRatio(picked.tokens, candidate.tokens) >= 0.62;
+    });
+
+    if (!isTooSimilar) {
+      selected.push(candidate);
+    }
+
+    if (selected.length >= limit) {
+      break;
+    }
+  }
+
+  return selected.map((candidate) => candidate.text);
+}
+
+function extractBatchSearchQueries(text: string) {
+  const googleAttempts = extractPureWordSearchQueries(text, {
+    minWords: BATCH_GOOGLE_QUERY_MIN_WORDS,
+    maxWords: BATCH_GOOGLE_QUERY_MAX_WORDS,
+    limit: MAX_GOOGLE_BATCH_QUERY_ATTEMPTS,
+  });
+  const worksheetAttempts = extractPureWordSearchQueries(text, {
+    minWords: BATCH_WORKSHEET_QUERY_MIN_WORDS,
+    maxWords: BATCH_WORKSHEET_QUERY_MAX_WORDS,
+    limit: MAX_WORKSHEET_BATCH_QUERY_ATTEMPTS,
+  });
+
+  return {
+    googleAttempts,
+    worksheetAttempts,
+    attempts: uniqueSearchQueries([...googleAttempts, ...worksheetAttempts]),
+  };
+}
+
 function tokenizeForReview(text: string): TextToken[] {
   const tokens: TextToken[] = [];
   const matcher = /[A-Za-z0-9]+/g;
@@ -967,7 +1115,7 @@ function getGoogleReviewStyles(level: GoogleBookMatchReview['level']) {
   };
 }
 
-function extractDistinctSearchQueries(text: string, limit = MAX_BATCH_QUERY_ATTEMPTS) {
+function extractDistinctSearchQueries(text: string, limit = MAX_WORKSHEET_BATCH_QUERY_ATTEMPTS) {
   const enhancedQueries = uniqueSearchQueries(extractEnhancementQueries(text, ''));
 
   if (enhancedQueries.length > 0) {
@@ -1045,6 +1193,8 @@ function createEmptyBatchResult(item: BatchInputItem): BatchSearchResult {
     googleQuery: '',
     worksheetQuery: '',
     attempts: [],
+    googleAttempts: [],
+    worksheetAttempts: [],
     googleResults: [],
     googleError: '',
     worksheetResults: null,
@@ -1185,6 +1335,78 @@ function WorksheetMakerMiniResult({ result, query }: { result?: WorksheetResult;
   );
 }
 
+async function findBatchGoogleResult(attempts: string[], sourceText: string) {
+  let googleError = '';
+  let hadSuccessfulRequest = false;
+
+  for (const query of attempts) {
+    try {
+      const googleResults = rankGoogleResultsForSource(await fetchGoogleBooks(query), sourceText, query);
+      hadSuccessfulRequest = true;
+      googleError = '';
+
+      if (googleResults.length > 0) {
+        return {
+          query,
+          results: googleResults,
+          error: '',
+        };
+      }
+    } catch {
+      googleError = 'Google Books 결과를 불러오지 못했습니다.';
+    }
+  }
+
+  return {
+    query: '',
+    results: [] as GoogleBookResult[],
+    error: hadSuccessfulRequest ? '' : googleError,
+  };
+}
+
+async function findBatchWorksheetResult(attempts: string[]) {
+  let worksheetError = '';
+  let hadSuccessfulRequest = false;
+  let fallbackResults: WorksheetSearchResponse | null = null;
+
+  for (const query of attempts) {
+    if (countWords(query) < BATCH_WORKSHEET_QUERY_MIN_WORDS) {
+      continue;
+    }
+
+    try {
+      const worksheetResults = await fetchWorksheetMaker(query);
+      hadSuccessfulRequest = true;
+      worksheetError = '';
+      fallbackResults = worksheetResults;
+
+      if ((worksheetResults.resultCount ?? 0) > 0) {
+        return {
+          query,
+          results: worksheetResults,
+          error: '',
+        };
+      }
+    } catch {
+      worksheetError = 'WorksheetMaker 결과를 불러오지 못했습니다.';
+    }
+  }
+
+  return {
+    query: '',
+    results: fallbackResults,
+    error: hadSuccessfulRequest ? '' : worksheetError,
+  };
+}
+
+function getBatchGoogleDisplayQuery(result: BatchSearchResult) {
+  return result.googleQuery || result.googleAttempts[0] || result.query;
+}
+
+function getBatchWorksheetDisplayQuery(result: BatchSearchResult) {
+  return result.worksheetQuery || result.worksheetAttempts[0] || result.query;
+}
+
 function BatchFinderApp() {
   const [rawInput, setRawInput] = useState('');
   const [results, setResults] = useState<BatchSearchResult[]>([]);
@@ -1206,74 +1428,33 @@ function BatchFinderApp() {
     setResults(parsedItems.map(createEmptyBatchResult));
 
     for (const item of parsedItems) {
-      const attempts = extractDistinctSearchQueries(item.text, MAX_BATCH_QUERY_ATTEMPTS);
+      const { googleAttempts, worksheetAttempts, attempts } = extractBatchSearchQueries(item.text);
 
       updateResult(item.id, (result) => ({
         ...result,
         status: 'searching',
-        query: attempts[0] ?? '',
+        query: googleAttempts[0] ?? worksheetAttempts[0] ?? '',
         attempts,
+        googleAttempts,
+        worksheetAttempts,
       }));
 
-      let selectedQuery = attempts[0] ?? '';
-      let googleQuery = '';
-      let worksheetQuery = '';
-      let selectedGoogleResults: GoogleBookResult[] = [];
-      let selectedWorksheetResults: WorksheetSearchResponse | null = null;
-      let fallbackWorksheetResults: WorksheetSearchResponse | null = null;
-      let googleError = '';
-      let worksheetError = '';
-
-      for (const query of attempts) {
-        selectedQuery = query;
-        const [googleResponse, worksheetResponse] = await Promise.allSettled([
-          googleQuery ? Promise.resolve(selectedGoogleResults) : fetchGoogleBooks(query),
-          worksheetQuery
-            ? Promise.resolve(selectedWorksheetResults)
-            : countWords(query) >= MIN_WORKSHEET_WORDS
-              ? fetchWorksheetMaker(query)
-              : Promise.resolve({ query, resultCount: 0, results: [] }),
-        ]);
-
-        if (!googleQuery && googleResponse.status === 'fulfilled') {
-          selectedGoogleResults = rankGoogleResultsForSource(googleResponse.value, item.text, query);
-          googleError = '';
-          if (selectedGoogleResults.length > 0) {
-            googleQuery = query;
-          }
-        } else if (googleResponse.status === 'rejected') {
-          googleError = 'Google Books 결과를 불러오지 못했습니다.';
-        }
-
-        if (!worksheetQuery && worksheetResponse.status === 'fulfilled') {
-          selectedWorksheetResults = worksheetResponse.value;
-          fallbackWorksheetResults = worksheetResponse.value;
-          worksheetError = '';
-          if ((selectedWorksheetResults?.resultCount ?? 0) > 0) {
-            worksheetQuery = query;
-          }
-        } else if (worksheetResponse.status === 'rejected') {
-          worksheetError = 'WorksheetMaker 결과를 불러오지 못했습니다.';
-        }
-
-        if (googleQuery && worksheetQuery) {
-          break;
-        }
-      }
-
-      selectedQuery = googleQuery || worksheetQuery || selectedQuery;
-      selectedWorksheetResults = selectedWorksheetResults ?? fallbackWorksheetResults;
+      const [googleSearch, worksheetSearch] = await Promise.all([
+        findBatchGoogleResult(googleAttempts, item.text),
+        findBatchWorksheetResult(worksheetAttempts),
+      ]);
+      const selectedQuery = googleSearch.query || worksheetSearch.query || googleAttempts[0] || worksheetAttempts[0] || '';
 
       updateResult(item.id, (result) => ({
         ...result,
-        status: googleError && worksheetError ? 'error' : 'done',
+        status: googleSearch.error && worksheetSearch.error ? 'error' : 'done',
         query: selectedQuery,
-        googleQuery,
-        worksheetQuery,
-        googleResults: selectedGoogleResults,
-        googleError,
-        worksheetResults: selectedWorksheetResults,
-        worksheetError,
+        googleQuery: googleSearch.query,
+        worksheetQuery: worksheetSearch.query,
+        googleResults: googleSearch.results,
+        googleError: googleSearch.error,
+        worksheetResults: worksheetSearch.results,
+        worksheetError: worksheetSearch.error,
       }));
     }
 
@@ -1374,8 +1555,8 @@ function BatchFinderApp() {
                       <div className="max-h-72 overflow-y-auto pr-1 text-sm leading-6 text-slate-700">
                         {result.query
                           ? highlightTextWithPatterns(result.text, [
-                              { text: result.googleQuery || result.query, className: 'bg-amber-200/80' },
-                              { text: result.worksheetQuery, className: 'bg-sky-200/85 text-sky-950' },
+                              { text: getBatchGoogleDisplayQuery(result), className: 'bg-amber-200/80' },
+                              { text: getBatchWorksheetDisplayQuery(result), className: 'bg-sky-200/85 text-sky-950' },
                             ])
                           : result.text}
                       </div>
@@ -1383,20 +1564,27 @@ function BatchFinderApp() {
                         <div className="mt-3 space-y-1 rounded-xl bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">
                           <p>
                             Google Books:{' '}
-                            <span className="font-semibold">{result.googleQuery || result.query}</span>
+                            <span className="font-semibold">{getBatchGoogleDisplayQuery(result)}</span>
                           </p>
                           <p>
                             WorksheetMaker:{' '}
-                            <span className="font-semibold">{result.worksheetQuery || result.query}</span>
+                            <span className="font-semibold">{getBatchWorksheetDisplayQuery(result)}</span>
                           </p>
                         </div>
                       )}
-                      {result.attempts.length > 1 && (
+                      {(result.googleAttempts.length > 1 || result.worksheetAttempts.length > 1) && (
                         <details className="mt-2 text-xs text-slate-500">
-                          <summary className="cursor-pointer">시도한 문구 {result.attempts.length}개</summary>
-                          <ul className="mt-2 space-y-1">
-                            {result.attempts.map((attempt) => (
-                              <li key={attempt}>• {attempt}</li>
+                          <summary className="cursor-pointer">시도한 문구 Google {result.googleAttempts.length}개 / WorksheetMaker {result.worksheetAttempts.length}개</summary>
+                          <p className="mt-2 font-semibold text-slate-600">Google Books</p>
+                          <ul className="mt-1 space-y-1">
+                            {result.googleAttempts.map((attempt) => (
+                              <li key={`google-${attempt}`}>• {attempt}</li>
+                            ))}
+                          </ul>
+                          <p className="mt-3 font-semibold text-slate-600">WorksheetMaker</p>
+                          <ul className="mt-1 space-y-1">
+                            {result.worksheetAttempts.map((attempt) => (
+                              <li key={`worksheet-${attempt}`}>• {attempt}</li>
                             ))}
                           </ul>
                         </details>
@@ -1410,7 +1598,7 @@ function BatchFinderApp() {
                       ) : result.googleError ? (
                         <p className="text-sm leading-6 text-rose-600">{result.googleError}</p>
                       ) : (
-                        <GoogleBooksMiniResult result={result.googleResults[0]} query={result.googleQuery || result.query} sourceText={result.text} />
+                        <GoogleBooksMiniResult result={result.googleResults[0]} query={getBatchGoogleDisplayQuery(result)} sourceText={result.text} />
                       )}
                     </div>
 
@@ -1426,7 +1614,7 @@ function BatchFinderApp() {
                       ) : result.worksheetError ? (
                         <p className="text-sm leading-6 text-rose-600">{result.worksheetError}</p>
                       ) : (
-                        <WorksheetMakerMiniResult result={result.worksheetResults?.results[0]} query={result.worksheetQuery || result.query} />
+                        <WorksheetMakerMiniResult result={result.worksheetResults?.results[0]} query={getBatchWorksheetDisplayQuery(result)} />
                       )}
                     </div>
                   </article>
