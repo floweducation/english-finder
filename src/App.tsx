@@ -124,9 +124,9 @@ const MIN_WORKSHEET_WORDS = 3;
 const MAX_ENHANCEMENT_RETRIES = 4;
 const FLOW_LLM_MODE = 'flow-llm';
 const ALL_MODE = 'all';
-const MAX_GOOGLE_BATCH_QUERY_ATTEMPTS = 10;
+const MAX_GOOGLE_BATCH_QUERY_ATTEMPTS = 5;
 const MAX_WORKSHEET_BATCH_QUERY_ATTEMPTS = 4;
-const GOOGLE_BATCH_RETRY_DELAY_MS = 8000;
+const GOOGLE_BATCH_RETRY_DELAY_MS = 10000;
 const BATCH_GOOGLE_QUERY_MIN_WORDS = 10;
 const BATCH_GOOGLE_QUERY_MAX_WORDS = 12;
 const BATCH_WORKSHEET_QUERY_MIN_WORDS = 6;
@@ -2262,9 +2262,6 @@ function SingleFinderApp() {
                 Google Books + WorksheetMaker
               </p>
             </div>
-          </a>
-          <a href={`${APP_HOME_URL}?mode=${ALL_MODE}`} className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-600 transition-colors hover:bg-slate-50">
-            일괄 검색
           </a>
         </div>
       </header>
