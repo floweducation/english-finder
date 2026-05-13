@@ -86,8 +86,6 @@ async function requestGoogleBooks({ query, apiKey, exactOnly = false }) {
 }
 
 async function requestGoogleBooksApiWithPublicFallback({ searchQuery, apiKey }) {
-  let primaryError = null;
-
   if (apiKey) {
     try {
       const keyedResults = await requestGoogleBooksApi({
@@ -99,7 +97,11 @@ async function requestGoogleBooksApiWithPublicFallback({ searchQuery, apiKey }) 
         return keyedResults;
       }
     } catch (error) {
-      primaryError = error;
+      throw error;
+    }
+
+    if (process.env.GOOGLE_BOOKS_PUBLIC_FALLBACK !== '1') {
+      return [];
     }
   }
 
@@ -108,9 +110,10 @@ async function requestGoogleBooksApiWithPublicFallback({ searchQuery, apiKey }) 
       searchQuery,
     });
   } catch (error) {
-    if (primaryError) {
-      throw primaryError;
+    if (apiKey && isGoogleBooksQuotaError(error)) {
+      return [];
     }
+
     throw error;
   }
 }
